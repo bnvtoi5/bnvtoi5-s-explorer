@@ -23,6 +23,7 @@ if %errorlevel% neq 0 (
 
 echo [1/4] Installing dependencies...
 call npm install
+call npm install --no-save @rollup/rollup-win32-x64-msvc@4.63.1
 
 echo [2/4] Generating Windows application icons...
 call node scripts/generate-icons.mjs

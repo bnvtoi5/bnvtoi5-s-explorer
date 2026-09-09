@@ -9,7 +9,10 @@ import {
   Copy,
   Check,
   Folder,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
+import { CustomSpace } from '../types';
 
 interface AddressBarProps {
   currentPath: string;
@@ -23,6 +26,8 @@ interface AddressBarProps {
   onNavigateToPath: (path: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  activeSpace?: CustomSpace | null;
+  onExitSpace?: () => void;
 }
 
 export const AddressBar: React.FC<AddressBarProps> = ({
@@ -37,6 +42,8 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onNavigateToPath,
   searchQuery,
   onSearchChange,
+  activeSpace,
+  onExitSpace,
 }) => {
   const [isEditingPath, setIsEditingPath] = useState(false);
   const [typedPath, setTypedPath] = useState(currentPath);
@@ -114,9 +121,9 @@ export const AddressBar: React.FC<AddressBarProps> = ({
         <button
           id="btn-nav-up"
           onClick={onNavigateUp}
-          disabled={!canGoUp}
+          disabled={!canGoUp || !!activeSpace}
           className={`p-1.5 rounded-md transition-colors ${
-            canGoUp
+            canGoUp && !activeSpace
               ? 'hover:bg-neutral-100 text-neutral-700'
               : 'text-neutral-300 cursor-not-allowed'
           }`}
@@ -137,7 +144,29 @@ export const AddressBar: React.FC<AddressBarProps> = ({
 
       {/* Breadcrumb / Address Bar */}
       <div className="flex-1 relative">
-        {isEditingPath ? (
+        {activeSpace ? (
+          /* Custom Space Address Display */
+          <div className="flex items-center justify-between w-full px-2 py-1 bg-blue-50/50 border border-blue-200 rounded-md text-xs min-h-[30px]">
+            <div className="flex items-center gap-1.5 overflow-x-auto text-blue-900 font-medium">
+              <Layers className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span>Không Gian Tùy Chỉnh</span>
+              <span className="text-neutral-400 text-[10px]">&gt;</span>
+              <span className="font-semibold text-neutral-900">{activeSpace.name}</span>
+              <span className="text-[10px] text-blue-600 bg-blue-100 px-1.5 py-0.2 rounded-full ml-1">
+                {activeSpace.items.length} mục
+              </span>
+            </div>
+
+            {onExitSpace && (
+              <button
+                onClick={onExitSpace}
+                className="text-[11px] font-medium text-neutral-600 hover:text-blue-700 hover:bg-blue-100/70 px-2 py-0.5 rounded transition-colors"
+              >
+                Về Explorer
+              </button>
+            )}
+          </div>
+        ) : isEditingPath ? (
           <form onSubmit={handlePathSubmit} className="w-full">
             <input
               id="input-address-path"
@@ -206,7 +235,13 @@ export const AddressBar: React.FC<AddressBarProps> = ({
           <input
             id="input-file-search"
             type="text"
-            placeholder={segments.length > 0 ? `Search ${segments[segments.length - 1]}` : 'Search files...'}
+            placeholder={
+              activeSpace
+                ? `Tìm trong ${activeSpace.name}...`
+                : segments.length > 0
+                ? `Search ${segments[segments.length - 1]}`
+                : 'Search files...'
+            }
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="w-full bg-transparent text-xs text-neutral-800 placeholder-neutral-400 outline-none"

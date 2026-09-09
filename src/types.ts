@@ -30,14 +30,43 @@ export interface KnownFolder {
   iconName?: string;
 }
 
+export type SpaceColor = 'blue' | 'purple' | 'emerald' | 'amber' | 'rose' | 'indigo' | 'cyan' | 'slate';
+export type SpaceIcon = 'sparkles' | 'folder' | 'briefcase' | 'star' | 'bookmark' | 'layers' | 'palette' | 'code' | 'zap' | 'box';
+
+export interface CustomSpaceItem {
+  id: string;
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  modifiedMs: number;
+  extension?: string;
+  addedAt: number;
+  note?: string;
+  tag?: string;
+  handle?: FileSystemHandle;
+}
+
+export interface CustomSpace {
+  id: string;
+  name: string;
+  color: SpaceColor;
+  icon: SpaceIcon;
+  description?: string;
+  createdAt: number;
+  items: CustomSpaceItem[];
+}
+
 export interface UserPreferences {
   pinnedFolders: string[];
+  customSpaces: CustomSpace[];
   theme: 'system' | 'dark' | 'light';
   viewMode: ViewMode;
   showHiddenFiles: boolean;
   sortBy: SortField;
   sortOrder: SortOrder;
   lastVisitedPath?: string;
+  activeSpaceId?: string | null;
 }
 
 export interface ContextMenuState {

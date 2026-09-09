@@ -14,6 +14,17 @@ let activeRootName = '';
 export async function loadUserPreferences(): Promise<UserPreferences> {
   const defaultPrefs: UserPreferences = {
     pinnedFolders: [],
+    customSpaces: [
+      {
+        id: 'space_default_hub',
+        name: 'Khu vực làm việc chính',
+        color: 'blue',
+        icon: 'sparkles',
+        description: 'Gom các file quan trọng từ nhiều thư mục khác nhau vào đây để truy cập nhanh',
+        createdAt: Date.now(),
+        items: [],
+      },
+    ],
     theme: 'light',
     viewMode: 'details',
     showHiddenFiles: false,
@@ -25,7 +36,11 @@ export async function loadUserPreferences(): Promise<UserPreferences> {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const prefs = await invoke<UserPreferences>('get_user_settings');
-      return { ...defaultPrefs, ...prefs };
+      return {
+        ...defaultPrefs,
+        ...prefs,
+        customSpaces: prefs.customSpaces || defaultPrefs.customSpaces,
+      };
     } catch {
       // Fallback to localStorage if Tauri command unavailable
     }
@@ -34,7 +49,12 @@ export async function loadUserPreferences(): Promise<UserPreferences> {
   try {
     const raw = localStorage.getItem('explorer_app_user_preferences');
     if (raw) {
-      return { ...defaultPrefs, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      return {
+        ...defaultPrefs,
+        ...parsed,
+        customSpaces: Array.isArray(parsed.customSpaces) ? parsed.customSpaces : defaultPrefs.customSpaces,
+      };
     }
   } catch {
     // Ignore error

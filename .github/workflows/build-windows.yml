@@ -16,11 +16,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js (Latest LTS 22.x)
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'npm'
+          node-version: '22.x'
+
+      - name: Print Node.js and npm versions
+        run: |
+          node --version
+          npm --version
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -28,7 +32,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit
 
       - name: Generate Application Icons
         run: node scripts/generate-icons.mjs
@@ -39,7 +43,7 @@ jobs:
       - name: Build Windows NSIS Installer and Portable Executable
         run: |
           npm run tauri build
-          mkdir -p release
+          New-Item -ItemType Directory -Force -Path release | Out-Null
           
           # Copy and standardize the NSIS Setup Installer
           $installer = Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*setup.exe" | Select-Object -First 1

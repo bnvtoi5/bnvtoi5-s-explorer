@@ -12,8 +12,11 @@ import {
   PackageCheck,
   Eye,
   RefreshCw,
+  Layers,
+  ChevronDown,
+  Plus,
 } from 'lucide-react';
-import { ViewMode, SortField, SortOrder, FileItem } from '../types';
+import { ViewMode, SortField, SortOrder, FileItem, CustomSpace } from '../types';
 
 interface CommandBarProps {
   currentPath: string;
@@ -32,7 +35,22 @@ interface CommandBarProps {
   onRenameSelected: () => void;
   onRefresh: () => void;
   onOpenInstallerGuide: () => void;
+  customSpaces?: CustomSpace[];
+  onAddSelectedToSpace?: (spaceId: string) => void;
+  onCreateNewSpace?: () => void;
+  activeSpaceId?: string | null;
 }
+
+const COLOR_DOTS: Record<string, string> = {
+  blue: 'bg-blue-500',
+  purple: 'bg-purple-500',
+  emerald: 'bg-emerald-500',
+  amber: 'bg-amber-500',
+  rose: 'bg-rose-500',
+  indigo: 'bg-indigo-500',
+  cyan: 'bg-cyan-500',
+  slate: 'bg-slate-500',
+};
 
 export const CommandBar: React.FC<CommandBarProps> = ({
   currentPath,
@@ -51,14 +69,20 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   onRenameSelected,
   onRefresh,
   onOpenInstallerGuide,
+  customSpaces = [],
+  onAddSelectedToSpace,
+  onCreateNewSpace,
+  activeSpaceId,
 }) => {
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showNewMenu, setShowNewMenu] = useState(false);
+  const [showSpaceMenu, setShowSpaceMenu] = useState(false);
 
   const sortMenuRef = useRef<HTMLDivElement>(null);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const newMenuRef = useRef<HTMLDivElement>(null);
+  const spaceMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -70,6 +94,9 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       }
       if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
         setShowNewMenu(false);
+      }
+      if (spaceMenuRef.current && !spaceMenuRef.current.contains(e.target as Node)) {
+        setShowSpaceMenu(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -85,13 +112,13 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       className="flex items-center justify-between px-3 py-1.5 border-b border-neutral-200 bg-neutral-50/90 select-none text-neutral-800 text-sm"
     >
       {/* Left actions */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-wrap">
         {/* Open Folder / Drive */}
         <button
           id="btn-open-real-folder"
           onClick={onOpenFolderPicker}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 active:bg-neutral-300/80 transition-colors font-medium text-neutral-800"
-          title="Open real local folder or drive"
+          title="Mở thư mục hoặc ổ đĩa thực tế trên máy"
         >
           <FolderInput className="w-4 h-4 text-blue-600" />
           <span>Open Folder</span>
@@ -104,9 +131,9 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           <button
             id="btn-new-menu"
             onClick={() => setShowNewMenu(!showNewMenu)}
-            disabled={!currentPath}
+            disabled={!currentPath && !activeSpaceId}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors ${
-              currentPath
+              currentPath || activeSpaceId
                 ? 'hover:bg-neutral-200/80 active:bg-neutral-300/80 text-neutral-800'
                 : 'text-neutral-400 cursor-not-allowed'
             }`}
@@ -139,13 +166,88 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                 <FilePlus className="w-4 h-4 text-blue-500" />
                 <span>Text Document</span>
               </button>
+              {onCreateNewSpace && (
+                <>
+                  <div className="border-t border-neutral-100 my-1" />
+                  <button
+                    id="btn-create-custom-space"
+                    onClick={() => {
+                      setShowNewMenu(false);
+                      onCreateNewSpace();
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 text-blue-600 text-xs font-medium"
+                  >
+                    <Layers className="w-4 h-4 text-blue-600" />
+                    <span>Không Gian Custom</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
 
+        {/* Gôm vào Không Gian Button (appears when items are selected) */}
+        {hasSelection && (
+          <div className="relative" ref={spaceMenuRef}>
+            <button
+              id="btn-add-to-space"
+              onClick={() => setShowSpaceMenu(!showSpaceMenu)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 font-medium transition-colors"
+              title="Gôm các file được chọn vào một Không Gian Tùy Chỉnh"
+            >
+              <Layers className="w-4 h-4 text-blue-600" />
+              <span>Gôm vào Không Gian ({selectedItems.length})</span>
+              <ChevronDown className="w-3 h-3 text-blue-500" />
+            </button>
+
+            {showSpaceMenu && (
+              <div className="absolute left-0 mt-1 w-52 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+                <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">
+                  Chọn Không Gian đích
+                </div>
+                {customSpaces.length === 0 ? (
+                  <div className="px-3 py-2 text-neutral-400 italic text-[11px]">
+                    Chưa có không gian nào
+                  </div>
+                ) : (
+                  customSpaces.map((space) => (
+                    <button
+                      key={space.id}
+                      onClick={() => {
+                        setShowSpaceMenu(false);
+                        if (onAddSelectedToSpace) onAddSelectedToSpace(space.id);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-blue-50 hover:text-blue-700 text-neutral-800"
+                    >
+                      <div className={`w-2 h-2 rounded-full ${COLOR_DOTS[space.color] || 'bg-blue-500'}`} />
+                      <span className="truncate flex-1">{space.name}</span>
+                      <span className="text-[10px] text-neutral-400">{space.items.length}</span>
+                    </button>
+                  ))
+                )}
+                {onCreateNewSpace && (
+                  <>
+                    <div className="border-t border-neutral-100 my-1" />
+                    <button
+                      onClick={() => {
+                        setShowSpaceMenu(false);
+                        onCreateNewSpace();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-blue-600 font-medium"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Tạo Không Gian Mới</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="h-4 w-px bg-neutral-300 mx-1" />
 
-        {/* Selection actions */}
+        {/* Selection actions: Rename & Delete */}
         <button
           id="btn-rename-item"
           onClick={onRenameSelected}

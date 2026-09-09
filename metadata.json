@@ -1,0 +1,6 @@
+{
+  "name": "Explorer App",
+  "description": "Fast, modern Windows 11 file explorer with native filesystem navigation, search, folder pinning, and standalone installer configuration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

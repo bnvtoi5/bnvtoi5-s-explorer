@@ -1,0 +1,66 @@
+name: Build Windows 11 Installer and Portable App
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build ExplorerApp Windows Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Application Icons
+        run: node scripts/generate-icons.mjs
+
+      - name: Build Web Frontend
+        run: npm run build
+
+      - name: Build Windows NSIS Installer and Portable Executable
+        run: |
+          npm run tauri build
+          mkdir -p release
+          
+          # Copy and standardize the NSIS Setup Installer
+          $installer = Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*setup.exe" | Select-Object -First 1
+          if ($installer) {
+            Copy-Item -Path $installer.FullName -Destination "release\ExplorerApp-Setup.exe"
+            Write-Host "Created release\ExplorerApp-Setup.exe"
+          } else {
+            Write-Warning "NSIS setup executable not found in expected folder."
+          }
+
+          # Copy and standardize the Portable Standalone Executable
+          $portable = "src-tauri\target\release\explorer-app.exe"
+          if (Test-Path $portable) {
+            Copy-Item -Path $portable -Destination "release\ExplorerApp-Portable.exe"
+            Write-Host "Created release\ExplorerApp-Portable.exe"
+          }
+
+      - name: Upload Windows Executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExplorerApp-Windows-Release
+          path: |
+            release/ExplorerApp-Setup.exe
+            release/ExplorerApp-Portable.exe

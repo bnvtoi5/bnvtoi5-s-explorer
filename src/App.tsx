@@ -1,0 +1,599 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  FileItem,
+  DriveInfo,
+  KnownFolder,
+  UserPreferences,
+  ViewMode,
+  SortField,
+  SortOrder,
+  ContextMenuState,
+} from './types';
+import {
+  isTauri,
+  loadUserPreferences,
+  saveUserPreferences,
+  getSystemDrives,
+  getKnownFolders,
+  promptOpenFolder,
+  readDirectoryItems,
+  searchRealFiles,
+  createRealFolder,
+  deleteRealItem,
+} from './services/fs';
+import { CommandBar } from './components/CommandBar';
+import { AddressBar } from './components/AddressBar';
+import { Sidebar } from './components/Sidebar';
+import { FileListView } from './components/FileListView';
+import { ContextMenu } from './components/ContextMenu';
+import { PropertiesModal } from './components/PropertiesModal';
+import { FilePreviewModal } from './components/FilePreviewModal';
+import { InstallerGuideModal } from './components/InstallerGuideModal';
+import { InputModal, ModalType } from './components/InputModal';
+import { StatusBar } from './components/StatusBar';
+
+export default function App() {
+  // Navigation & Directory state
+  const [currentPath, setCurrentPath] = useState<string>('');
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  const [items, setItems] = useState<FileItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<FileItem[]>([]);
+
+  // Selection state
+  const [selectedItems, setSelectedItems] = useState<FileItem[]>([]);
+
+  // System & Preferences state
+  const [preferences, setPreferences] = useState<UserPreferences>({
+    pinnedFolders: [],
+    theme: 'light',
+    viewMode: 'details',
+    showHiddenFiles: false,
+    sortBy: 'name',
+    sortOrder: 'asc',
+  });
+  const [drives, setDrives] = useState<DriveInfo[]>([]);
+  const [knownFolders, setKnownFolders] = useState<KnownFolder[]>([]);
+
+  // Context Menu state
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
+    x: 0,
+    y: 0,
+    item: null,
+    isOpen: false,
+  });
+
+  // Modal dialog states
+  const [propertiesItem, setPropertiesItem] = useState<{ item: FileItem | null; isOpen: boolean }>({
+    item: null,
+    isOpen: false,
+  });
+  const [previewItem, setPreviewItem] = useState<FileItem | null>(null);
+  const [inputModal, setInputModal] = useState<{
+    type: ModalType;
+    initialValue?: string;
+    itemName?: string;
+    targetItem?: FileItem | null;
+    isOpen: boolean;
+  }>({
+    type: null,
+    isOpen: false,
+  });
+  const [isInstallerGuideOpen, setIsInstallerGuideOpen] = useState<boolean>(false);
+
+  // Load initial settings and drives
+  useEffect(() => {
+    async function init() {
+      const prefs = await loadUserPreferences();
+      setPreferences(prefs);
+
+      const sysDrives = await getSystemDrives();
+      setDrives(sysDrives);
+
+      const kf = await getKnownFolders();
+      setKnownFolders(kf);
+
+      // In Tauri or if lastVisitedPath is set, open initial folder
+      if (isTauri() && sysDrives.length > 0) {
+        navigateTo(sysDrives[0].path, false);
+      } else if (prefs.lastVisitedPath) {
+        // try restore
+      }
+    }
+    init();
+  }, []);
+
+  // Update preferences helper
+  const updatePreferences = useCallback(
+    (updater: (prev: UserPreferences) => UserPreferences) => {
+      setPreferences((prev) => {
+        const next = updater(prev);
+        saveUserPreferences(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  // Load directory items
+  const loadDirectory = useCallback(
+    async (path: string) => {
+      if (!path) {
+        setItems([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const fileItems = await readDirectoryItems(path, preferences.showHiddenFiles);
+        setItems(fileItems);
+        setSelectedItems([]);
+      } catch {
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [preferences.showHiddenFiles]
+  );
+
+  // Reload current directory
+  const handleRefresh = useCallback(() => {
+    if (currentPath) {
+      loadDirectory(currentPath);
+    }
+  }, [currentPath, loadDirectory]);
+
+  // Navigate to path with history tracking
+  const navigateTo = useCallback(
+    (newPath: string, pushHistory = true) => {
+      if (!newPath) return;
+
+      if (pushHistory) {
+        setHistory((prev) => {
+          const updated = prev.slice(0, historyIndex + 1);
+          return [...updated, newPath];
+        });
+        setHistoryIndex((prev) => prev + 1);
+      }
+
+      setCurrentPath(newPath);
+      setSearchQuery('');
+      loadDirectory(newPath);
+    },
+    [historyIndex, loadDirectory]
+  );
+
+  // History navigation
+  const canGoBack = historyIndex > 0;
+  const canGoForward = historyIndex < history.length - 1;
+  const canGoUp = Boolean(
+    currentPath &&
+      (currentPath.includes('/') || currentPath.includes('\\')) &&
+      currentPath !== 'C:\\' &&
+      currentPath !== '/'
+  );
+
+  const handleNavigateBack = () => {
+    if (canGoBack) {
+      const nextIdx = historyIndex - 1;
+      const target = history[nextIdx];
+      setHistoryIndex(nextIdx);
+      setCurrentPath(target);
+      setSearchQuery('');
+      loadDirectory(target);
+    }
+  };
+
+  const handleNavigateForward = () => {
+    if (canGoForward) {
+      const nextIdx = historyIndex + 1;
+      const target = history[nextIdx];
+      setHistoryIndex(nextIdx);
+      setCurrentPath(target);
+      setSearchQuery('');
+      loadDirectory(target);
+    }
+  };
+
+  const handleNavigateUp = () => {
+    if (!canGoUp) return;
+    const isWindows = currentPath.includes('\\');
+    const separator = isWindows ? '\\' : '/';
+    const parts = currentPath.split(separator).filter(Boolean);
+    parts.pop();
+    const parentPath = parts.join(separator) || (isWindows ? 'C:\\' : '/');
+    navigateTo(parentPath);
+  };
+
+  // Open real folder picker (Web API or Tauri)
+  const handleOpenFolderPicker = async () => {
+    try {
+      const res = await promptOpenFolder();
+      if (res) {
+        navigateTo(res.path);
+        const sysDrives = await getSystemDrives();
+        setDrives(sysDrives);
+      }
+    } catch (err: unknown) {
+      alert((err as Error).message || 'Failed to open directory');
+    }
+  };
+
+  // Search real files
+  useEffect(() => {
+    if (!searchQuery.trim() || !currentPath) {
+      setSearchResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      const results = await searchRealFiles(currentPath, searchQuery);
+      setSearchResults(results);
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentPath]);
+
+  // Sort and filter displayed items
+  const displayedItems = useMemo(() => {
+    const raw = searchQuery.trim() ? searchResults : items;
+    const sorted = [...raw];
+
+    sorted.sort((a, b) => {
+      // Folders always first
+      if (a.isDir && !b.isDir) return -1;
+      if (!a.isDir && b.isDir) return 1;
+
+      let comparison = 0;
+      switch (preferences.sortBy) {
+        case 'name':
+          comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+          break;
+        case 'modified':
+          comparison = a.modifiedMs - b.modifiedMs;
+          break;
+        case 'size':
+          comparison = a.size - b.size;
+          break;
+        case 'type':
+          comparison = (a.extension || '').localeCompare(b.extension || '');
+          break;
+      }
+
+      return preferences.sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [items, searchResults, searchQuery, preferences.sortBy, preferences.sortOrder]);
+
+  // Selection handlers
+  const handleSelectItem = (item: FileItem, isMulti: boolean) => {
+    if (isMulti) {
+      setSelectedItems((prev) =>
+        prev.some((s) => s.id === item.id)
+          ? prev.filter((s) => s.id !== item.id)
+          : [...prev, item]
+      );
+    } else {
+      setSelectedItems([item]);
+    }
+  };
+
+  // Open item (double click or Enter)
+  const handleOpenItem = (item: FileItem) => {
+    if (item.isDir) {
+      navigateTo(item.path);
+    } else {
+      setPreviewItem(item);
+    }
+  };
+
+  // Pin / Unpin folder handlers
+  const handlePinFolder = (path: string) => {
+    updatePreferences((prev) => {
+      if (prev.pinnedFolders.includes(path)) return prev;
+      return { ...prev, pinnedFolders: [...prev.pinnedFolders, path] };
+    });
+  };
+
+  const handleUnpinFolder = (path: string) => {
+    updatePreferences((prev) => ({
+      ...prev,
+      pinnedFolders: prev.pinnedFolders.filter((p) => p !== path),
+    }));
+  };
+
+  // Context Menu trigger
+  const handleContextMenu = (e: React.MouseEvent, item: FileItem | null) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      item,
+      isOpen: true,
+    });
+    if (item && !selectedItems.some((s) => s.id === item.id)) {
+      setSelectedItems([item]);
+    }
+  };
+
+  // Create folder action
+  const handleCreateFolder = () => {
+    setInputModal({
+      type: 'new-folder',
+      initialValue: 'New folder',
+      isOpen: true,
+    });
+  };
+
+  // Create file action
+  const handleCreateFile = () => {
+    setInputModal({
+      type: 'new-file',
+      initialValue: 'New Text Document.txt',
+      isOpen: true,
+    });
+  };
+
+  // Rename selected action
+  const handleRenameSelected = () => {
+    if (selectedItems.length !== 1) return;
+    const item = selectedItems[0];
+    setInputModal({
+      type: 'rename',
+      initialValue: item.name,
+      itemName: item.name,
+      targetItem: item,
+      isOpen: true,
+    });
+  };
+
+  // Delete selected action
+  const handleDeleteSelected = () => {
+    if (selectedItems.length === 0) return;
+    const item = selectedItems[0];
+    setInputModal({
+      type: 'confirm-delete',
+      itemName: selectedItems.length === 1 ? item.name : `${selectedItems.length} items`,
+      targetItem: item,
+      isOpen: true,
+    });
+  };
+
+  // Modal Submit handler
+  const handleModalSubmit = async (value: string) => {
+    if (!currentPath) return;
+
+    try {
+      if (inputModal.type === 'new-folder') {
+        await createRealFolder(currentPath, value);
+        handleRefresh();
+      } else if (inputModal.type === 'new-file') {
+        // Create empty file
+        if (isTauri()) {
+          // Tauri file creation
+        } else {
+          // Web API create file
+          const { readDirectoryItems } = await import('./services/fs');
+          // Touch file
+        }
+        handleRefresh();
+      }
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  };
+
+  // Confirm delete handler
+  const handleConfirmDelete = async () => {
+    try {
+      for (const item of selectedItems) {
+        await deleteRealItem(item.path, item);
+      }
+      setSelectedItems([]);
+      handleRefresh();
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  };
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRefresh();
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        handleRenameSelected();
+      } else if (e.key === 'Delete') {
+        if (selectedItems.length > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+        }
+      } else if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handleNavigateBack();
+      } else if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNavigateForward();
+      } else if (e.altKey && e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleNavigateUp();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    handleRefresh,
+    handleRenameSelected,
+    handleDeleteSelected,
+    handleNavigateBack,
+    handleNavigateForward,
+    handleNavigateUp,
+    selectedItems,
+  ]);
+
+  return (
+    <div
+      id="explorer-root-container"
+      className="flex flex-col h-screen w-screen bg-white text-neutral-900 overflow-hidden font-sans selection:bg-blue-200"
+    >
+      {/* 1. Command Bar */}
+      <CommandBar
+        currentPath={currentPath}
+        selectedItems={selectedItems}
+        viewMode={preferences.viewMode}
+        onViewModeChange={(mode) => updatePreferences((p) => ({ ...p, viewMode: mode }))}
+        sortBy={preferences.sortBy}
+        sortOrder={preferences.sortOrder}
+        onSortChange={(field, order) =>
+          updatePreferences((p) => ({ ...p, sortBy: field, sortOrder: order }))
+        }
+        showHidden={preferences.showHiddenFiles}
+        onToggleShowHidden={() =>
+          updatePreferences((p) => ({ ...p, showHiddenFiles: !p.showHiddenFiles }))
+        }
+        onOpenFolderPicker={handleOpenFolderPicker}
+        onCreateFolder={handleCreateFolder}
+        onCreateFile={handleCreateFile}
+        onDeleteSelected={handleDeleteSelected}
+        onRenameSelected={handleRenameSelected}
+        onRefresh={handleRefresh}
+        onOpenInstallerGuide={() => setIsInstallerGuideOpen(true)}
+      />
+
+      {/* 2. Address & Search Bar */}
+      <AddressBar
+        currentPath={currentPath}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        canGoUp={canGoUp}
+        onNavigateBack={handleNavigateBack}
+        onNavigateForward={handleNavigateForward}
+        onNavigateUp={handleNavigateUp}
+        onRefresh={handleRefresh}
+        onNavigateToPath={(path) => navigateTo(path)}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
+
+      {/* 3. Main Body: Sidebar + File List View */}
+      <div className="flex-1 flex overflow-hidden">
+        <Sidebar
+          currentPath={currentPath}
+          pinnedFolders={preferences.pinnedFolders}
+          drives={drives}
+          knownFolders={knownFolders}
+          onNavigateToPath={(path) => navigateTo(path)}
+          onUnpinFolder={handleUnpinFolder}
+          onOpenFolderPicker={handleOpenFolderPicker}
+        />
+
+        <main className="flex-1 flex flex-col min-w-0 bg-white relative">
+          {loading && (
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-600 animate-pulse z-20" />
+          )}
+
+          <FileListView
+            items={displayedItems}
+            currentPath={currentPath}
+            selectedItems={selectedItems}
+            onSelectItem={handleSelectItem}
+            onOpenItem={handleOpenItem}
+            onContextMenu={handleContextMenu}
+            viewMode={preferences.viewMode}
+            sortBy={preferences.sortBy}
+            sortOrder={preferences.sortOrder}
+            onSortChange={(field, order) =>
+              updatePreferences((p) => ({ ...p, sortBy: field, sortOrder: order }))
+            }
+            onOpenFolderPicker={handleOpenFolderPicker}
+            isSearching={Boolean(searchQuery.trim())}
+          />
+        </main>
+      </div>
+
+      {/* 4. Status Bar */}
+      <StatusBar
+        totalCount={displayedItems.length}
+        selectedItems={selectedItems}
+        viewMode={preferences.viewMode}
+        onViewModeChange={(mode) => updatePreferences((p) => ({ ...p, viewMode: mode }))}
+        isNative={isTauri()}
+      />
+
+      {/* 5. Context Menu */}
+      {contextMenu.isOpen && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          item={contextMenu.item}
+          pinnedFolders={preferences.pinnedFolders}
+          onClose={() => setContextMenu((prev) => ({ ...prev, isOpen: false }))}
+          onOpen={(item) => handleOpenItem(item)}
+          onPin={handlePinFolder}
+          onUnpin={handleUnpinFolder}
+          onRename={(item) => {
+            setInputModal({
+              type: 'rename',
+              initialValue: item.name,
+              itemName: item.name,
+              targetItem: item,
+              isOpen: true,
+            });
+          }}
+          onDelete={(item) => {
+            setInputModal({
+              type: 'confirm-delete',
+              itemName: item.name,
+              targetItem: item,
+              isOpen: true,
+            });
+          }}
+          onShowProperties={(item) => setPropertiesItem({ item, isOpen: true })}
+          onCreateFolder={handleCreateFolder}
+          onCreateFile={handleCreateFile}
+          onRefresh={handleRefresh}
+        />
+      )}
+
+      {/* 6. Properties Modal */}
+      {propertiesItem.isOpen && (
+        <PropertiesModal
+          item={propertiesItem.item}
+          currentPath={currentPath}
+          onClose={() => setPropertiesItem({ item: null, isOpen: false })}
+        />
+      )}
+
+      {/* 7. File Preview Modal */}
+      {previewItem && (
+        <FilePreviewModal
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
+        />
+      )}
+
+      {/* 8. Input Modal (Rename, New Folder, Confirm Delete) */}
+      <InputModal
+        type={inputModal.type}
+        initialValue={inputModal.initialValue}
+        itemName={inputModal.itemName}
+        isOpen={inputModal.isOpen}
+        onClose={() => setInputModal((prev) => ({ ...prev, isOpen: false }))}
+        onSubmit={handleModalSubmit}
+        onConfirmDelete={handleConfirmDelete}
+      />
+
+      {/* 9. Windows Installer & Packaging Guide Modal */}
+      {isInstallerGuideOpen && (
+        <InstallerGuideModal onClose={() => setIsInstallerGuideOpen(false)} />
+      )}
+    </div>
+  );
+}

@@ -9,14 +9,11 @@ import {
   LayoutGrid,
   List,
   Columns,
-  PackageCheck,
   Eye,
   RefreshCw,
   Layers,
-  ChevronDown,
-  Plus,
 } from 'lucide-react';
-import { ViewMode, SortField, SortOrder, FileItem, CustomSpace } from '../types';
+import { ViewMode, SortField, SortOrder, FileItem } from '../types';
 
 interface CommandBarProps {
   currentPath: string;
@@ -34,23 +31,7 @@ interface CommandBarProps {
   onDeleteSelected: () => void;
   onRenameSelected: () => void;
   onRefresh: () => void;
-  onOpenInstallerGuide: () => void;
-  customSpaces?: CustomSpace[];
-  onAddSelectedToSpace?: (spaceId: string) => void;
-  onCreateNewSpace?: () => void;
-  activeSpaceId?: string | null;
 }
-
-const COLOR_DOTS: Record<string, string> = {
-  blue: 'bg-blue-500',
-  purple: 'bg-purple-500',
-  emerald: 'bg-emerald-500',
-  amber: 'bg-amber-500',
-  rose: 'bg-rose-500',
-  indigo: 'bg-indigo-500',
-  cyan: 'bg-cyan-500',
-  slate: 'bg-slate-500',
-};
 
 export const CommandBar: React.FC<CommandBarProps> = ({
   currentPath,
@@ -68,21 +49,14 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   onDeleteSelected,
   onRenameSelected,
   onRefresh,
-  onOpenInstallerGuide,
-  customSpaces = [],
-  onAddSelectedToSpace,
-  onCreateNewSpace,
-  activeSpaceId,
 }) => {
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const [showNewMenu, setShowNewMenu] = useState(false);
-  const [showSpaceMenu, setShowSpaceMenu] = useState(false);
 
   const sortMenuRef = useRef<HTMLDivElement>(null);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const newMenuRef = useRef<HTMLDivElement>(null);
-  const spaceMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -94,9 +68,6 @@ export const CommandBar: React.FC<CommandBarProps> = ({
       }
       if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
         setShowNewMenu(false);
-      }
-      if (spaceMenuRef.current && !spaceMenuRef.current.contains(e.target as Node)) {
-        setShowSpaceMenu(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -117,11 +88,11 @@ export const CommandBar: React.FC<CommandBarProps> = ({
         <button
           id="btn-open-real-folder"
           onClick={onOpenFolderPicker}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 active:bg-neutral-300/80 transition-colors font-medium text-neutral-800"
-          title="Mở thư mục hoặc ổ đĩa thực tế trên máy"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 active:bg-neutral-300/80 transition-colors font-medium text-neutral-800 text-xs"
+          title="Mở thư mục trên máy tính"
         >
           <FolderInput className="w-4 h-4 text-blue-600" />
-          <span>Open Folder</span>
+          <span>Mở Thư Mục</span>
         </button>
 
         <div className="h-4 w-px bg-neutral-300 mx-1" />
@@ -131,19 +102,19 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           <button
             id="btn-new-menu"
             onClick={() => setShowNewMenu(!showNewMenu)}
-            disabled={!currentPath && !activeSpaceId}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors ${
-              currentPath || activeSpaceId
+            disabled={!currentPath}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
+              currentPath
                 ? 'hover:bg-neutral-200/80 active:bg-neutral-300/80 text-neutral-800'
                 : 'text-neutral-400 cursor-not-allowed'
             }`}
           >
             <FolderPlus className="w-4 h-4 text-amber-600" />
-            <span>New</span>
+            <span>Tạo Mới</span>
           </button>
 
           {showNewMenu && (
-            <div className="absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute left-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
               <button
                 id="btn-create-folder"
                 onClick={() => {
@@ -153,7 +124,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
               >
                 <FolderPlus className="w-4 h-4 text-amber-500" />
-                <span>Folder</span>
+                <span>Thư mục mới</span>
               </button>
               <button
                 id="btn-create-file"
@@ -164,86 +135,11 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
               >
                 <FilePlus className="w-4 h-4 text-blue-500" />
-                <span>Text Document</span>
+                <span>Tập tin văn bản (.txt)</span>
               </button>
-              {onCreateNewSpace && (
-                <>
-                  <div className="border-t border-neutral-100 my-1" />
-                  <button
-                    id="btn-create-custom-space"
-                    onClick={() => {
-                      setShowNewMenu(false);
-                      onCreateNewSpace();
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 text-blue-600 text-xs font-medium"
-                  >
-                    <Layers className="w-4 h-4 text-blue-600" />
-                    <span>Không Gian Custom</span>
-                  </button>
-                </>
-              )}
             </div>
           )}
         </div>
-
-        {/* Gôm vào Không Gian Button (appears when items are selected) */}
-        {hasSelection && (
-          <div className="relative" ref={spaceMenuRef}>
-            <button
-              id="btn-add-to-space"
-              onClick={() => setShowSpaceMenu(!showSpaceMenu)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 font-medium transition-colors"
-              title="Gôm các file được chọn vào một Không Gian Tùy Chỉnh"
-            >
-              <Layers className="w-4 h-4 text-blue-600" />
-              <span>Gôm vào Không Gian ({selectedItems.length})</span>
-              <ChevronDown className="w-3 h-3 text-blue-500" />
-            </button>
-
-            {showSpaceMenu && (
-              <div className="absolute left-0 mt-1 w-52 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
-                <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">
-                  Chọn Không Gian đích
-                </div>
-                {customSpaces.length === 0 ? (
-                  <div className="px-3 py-2 text-neutral-400 italic text-[11px]">
-                    Chưa có không gian nào
-                  </div>
-                ) : (
-                  customSpaces.map((space) => (
-                    <button
-                      key={space.id}
-                      onClick={() => {
-                        setShowSpaceMenu(false);
-                        if (onAddSelectedToSpace) onAddSelectedToSpace(space.id);
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-blue-50 hover:text-blue-700 text-neutral-800"
-                    >
-                      <div className={`w-2 h-2 rounded-full ${COLOR_DOTS[space.color] || 'bg-blue-500'}`} />
-                      <span className="truncate flex-1">{space.name}</span>
-                      <span className="text-[10px] text-neutral-400">{space.items.length}</span>
-                    </button>
-                  ))
-                )}
-                {onCreateNewSpace && (
-                  <>
-                    <div className="border-t border-neutral-100 my-1" />
-                    <button
-                      onClick={() => {
-                        setShowSpaceMenu(false);
-                        onCreateNewSpace();
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-blue-600 font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>+ Tạo Không Gian Mới</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="h-4 w-px bg-neutral-300 mx-1" />
 
@@ -252,30 +148,30 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           id="btn-rename-item"
           onClick={onRenameSelected}
           disabled={!singleSelection}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
             singleSelection
               ? 'hover:bg-neutral-200/80 active:bg-neutral-300/80 text-neutral-800'
               : 'text-neutral-400 cursor-not-allowed'
           }`}
-          title="Rename selected item (F2)"
+          title="Đổi tên mục đã chọn (F2)"
         >
           <Edit2 className="w-4 h-4" />
-          <span>Rename</span>
+          <span>Đổi tên</span>
         </button>
 
         <button
           id="btn-delete-item"
           onClick={onDeleteSelected}
           disabled={!hasSelection}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
             hasSelection
               ? 'hover:bg-red-50 text-red-700'
               : 'text-neutral-400 cursor-not-allowed'
           }`}
-          title="Delete selected item"
+          title="Xóa mục đã chọn (Delete)"
         >
           <Trash2 className="w-4 h-4" />
-          <span>Delete</span>
+          <span>Xóa</span>
         </button>
 
         <div className="h-4 w-px bg-neutral-300 mx-1" />
@@ -285,20 +181,20 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           <button
             id="btn-sort-menu"
             onClick={() => setShowSortMenu(!showSortMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 transition-colors text-neutral-800"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 transition-colors text-neutral-800 text-xs"
           >
             <ArrowUpDown className="w-4 h-4 text-neutral-600" />
-            <span>Sort</span>
+            <span>Sắp xếp</span>
           </button>
 
           {showSortMenu && (
             <div className="absolute left-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 text-xs">
-              <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">Sort by</div>
+              <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">Sắp xếp theo</div>
               {[
-                { field: 'name' as SortField, label: 'Name' },
-                { field: 'modified' as SortField, label: 'Date modified' },
-                { field: 'type' as SortField, label: 'Type' },
-                { field: 'size' as SortField, label: 'Size' },
+                { field: 'name' as SortField, label: 'Tên' },
+                { field: 'modified' as SortField, label: 'Ngày sửa đổi' },
+                { field: 'type' as SortField, label: 'Loại file' },
+                { field: 'size' as SortField, label: 'Dung lượng' },
               ].map(({ field, label }) => (
                 <button
                   key={field}
@@ -312,7 +208,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                   <span>{label}</span>
                   {sortBy === field && (
                     <span className="text-blue-600 text-[10px]">
-                      {sortOrder === 'asc' ? '▲ Asc' : '▼ Desc'}
+                      {sortOrder === 'asc' ? '▲ Tăng' : '▼ Giảm'}
                     </span>
                   )}
                 </button>
@@ -326,21 +222,23 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           <button
             id="btn-view-menu"
             onClick={() => setShowViewMenu(!showViewMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 transition-colors text-neutral-800"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-neutral-200/80 transition-colors text-neutral-800 text-xs"
           >
             {viewMode === 'details' && <List className="w-4 h-4 text-neutral-600" />}
             {viewMode === 'grid' && <LayoutGrid className="w-4 h-4 text-neutral-600" />}
             {viewMode === 'tiles' && <Columns className="w-4 h-4 text-neutral-600" />}
-            <span>View</span>
+            {viewMode === 'zones' && <Layers className="w-4 h-4 text-blue-600" />}
+            <span>Chế độ xem</span>
           </button>
 
           {showViewMenu && (
-            <div className="absolute left-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 text-xs">
-              <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">Layout</div>
+            <div className="absolute left-0 mt-1 w-52 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 text-xs">
+              <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">Bố cục hiển thị</div>
               {[
-                { mode: 'details' as ViewMode, label: 'Details', icon: List },
-                { mode: 'grid' as ViewMode, label: 'Large Icons', icon: LayoutGrid },
-                { mode: 'tiles' as ViewMode, label: 'Tiles', icon: Columns },
+                { mode: 'details' as ViewMode, label: 'Chi tiết (Details)', icon: List },
+                { mode: 'grid' as ViewMode, label: 'Lưới biểu tượng (Icons)', icon: LayoutGrid },
+                { mode: 'tiles' as ViewMode, label: 'Thẻ (Tiles)', icon: Columns },
+                { mode: 'zones' as ViewMode, label: 'Hộp Khu Vực (Smart Zones)', icon: Layers },
               ].map(({ mode, label, icon: IconComp }) => (
                 <button
                   key={mode}
@@ -372,7 +270,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
               >
                 <span className="flex items-center gap-2">
                   <Eye className="w-3.5 h-3.5 text-neutral-500" />
-                  Hidden items
+                  Mục ẩn (Hidden files)
                 </span>
                 {showHidden && <span className="text-blue-600">✓</span>}
               </button>
@@ -385,21 +283,40 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           id="btn-refresh-command"
           onClick={onRefresh}
           className="p-1.5 rounded-md hover:bg-neutral-200/80 transition-colors text-neutral-600"
-          title="Refresh (F5)"
+          title="Làm mới (F5)"
         >
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Right actions: Windows 11 Installer & Packaging Guide button */}
-      <div className="flex items-center gap-2">
+      {/* Right Quick Switcher: 1-click toggle between Standard List & Smart Zones */}
+      <div className="flex items-center gap-1.5 bg-neutral-200/60 p-0.5 rounded-lg">
         <button
-          id="btn-installer-guide"
-          onClick={onOpenInstallerGuide}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/80 font-medium text-xs transition-all shadow-xs"
+          id="btn-switch-details"
+          onClick={() => onViewModeChange('details')}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+            viewMode === 'details'
+              ? 'bg-white text-neutral-900 shadow-xs'
+              : 'text-neutral-600 hover:text-neutral-900'
+          }`}
+          title="Chế độ xem danh sách chi tiết thông thường"
         >
-          <PackageCheck className="w-4 h-4 text-blue-600" />
-          <span>Windows Installer & Build</span>
+          <List className="w-3.5 h-3.5" />
+          <span>Danh Sách</span>
+        </button>
+
+        <button
+          id="btn-switch-zones"
+          onClick={() => onViewModeChange('zones')}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+            viewMode === 'zones'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-neutral-600 hover:text-neutral-900'
+          }`}
+          title="Chế độ xem các Hộp Khu Vực tự gôm file thông minh"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Hộp Khu Vực</span>
         </button>
       </div>
     </div>

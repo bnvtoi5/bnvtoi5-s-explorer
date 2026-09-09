@@ -42,6 +42,7 @@
     "vite": "^6.2.3"
   },
   "optionalDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "4.63.1"
+    "@rollup/rollup-win32-x64-msvc": "4.63.1",
+    "lightningcss-win32-x64-msvc": "1.32.0"
   }
 }

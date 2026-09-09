@@ -9,10 +9,7 @@ import {
   Copy,
   Check,
   Folder,
-  Layers,
-  Sparkles,
 } from 'lucide-react';
-import { CustomSpace } from '../types';
 
 interface AddressBarProps {
   currentPath: string;
@@ -26,8 +23,6 @@ interface AddressBarProps {
   onNavigateToPath: (path: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
-  activeSpace?: CustomSpace | null;
-  onExitSpace?: () => void;
 }
 
 export const AddressBar: React.FC<AddressBarProps> = ({
@@ -42,8 +37,6 @@ export const AddressBar: React.FC<AddressBarProps> = ({
   onNavigateToPath,
   searchQuery,
   onSearchChange,
-  activeSpace,
-  onExitSpace,
 }) => {
   const [isEditingPath, setIsEditingPath] = useState(false);
   const [typedPath, setTypedPath] = useState(currentPath);
@@ -99,7 +92,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               ? 'hover:bg-neutral-100 text-neutral-700'
               : 'text-neutral-300 cursor-not-allowed'
           }`}
-          title="Back (Alt+Left Arrow)"
+          title="Quay lại (Alt+Left Arrow)"
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
@@ -113,7 +106,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               ? 'hover:bg-neutral-100 text-neutral-700'
               : 'text-neutral-300 cursor-not-allowed'
           }`}
-          title="Forward (Alt+Right Arrow)"
+          title="Tiếp theo (Alt+Right Arrow)"
         >
           <ArrowRight className="w-4 h-4" />
         </button>
@@ -121,13 +114,13 @@ export const AddressBar: React.FC<AddressBarProps> = ({
         <button
           id="btn-nav-up"
           onClick={onNavigateUp}
-          disabled={!canGoUp || !!activeSpace}
+          disabled={!canGoUp}
           className={`p-1.5 rounded-md transition-colors ${
-            canGoUp && !activeSpace
+            canGoUp
               ? 'hover:bg-neutral-100 text-neutral-700'
               : 'text-neutral-300 cursor-not-allowed'
           }`}
-          title="Up to parent folder (Alt+Up Arrow)"
+          title="Lên thư mục cha (Alt+Up Arrow)"
         >
           <ArrowUp className="w-4 h-4" />
         </button>
@@ -136,7 +129,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
           id="btn-nav-refresh"
           onClick={onRefresh}
           className="p-1.5 rounded-md hover:bg-neutral-100 text-neutral-700 transition-colors"
-          title="Refresh"
+          title="Làm mới (F5)"
         >
           <RefreshCw className="w-4 h-4" />
         </button>
@@ -144,29 +137,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
 
       {/* Breadcrumb / Address Bar */}
       <div className="flex-1 relative">
-        {activeSpace ? (
-          /* Custom Space Address Display */
-          <div className="flex items-center justify-between w-full px-2 py-1 bg-blue-50/50 border border-blue-200 rounded-md text-xs min-h-[30px]">
-            <div className="flex items-center gap-1.5 overflow-x-auto text-blue-900 font-medium">
-              <Layers className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span>Không Gian Tùy Chỉnh</span>
-              <span className="text-neutral-400 text-[10px]">&gt;</span>
-              <span className="font-semibold text-neutral-900">{activeSpace.name}</span>
-              <span className="text-[10px] text-blue-600 bg-blue-100 px-1.5 py-0.2 rounded-full ml-1">
-                {activeSpace.items.length} mục
-              </span>
-            </div>
-
-            {onExitSpace && (
-              <button
-                onClick={onExitSpace}
-                className="text-[11px] font-medium text-neutral-600 hover:text-blue-700 hover:bg-blue-100/70 px-2 py-0.5 rounded transition-colors"
-              >
-                Về Explorer
-              </button>
-            )}
-          </div>
-        ) : isEditingPath ? (
+        {isEditingPath ? (
           <form onSubmit={handlePathSubmit} className="w-full">
             <input
               id="input-address-path"
@@ -175,7 +146,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               onChange={(e) => setTypedPath(e.target.value)}
               onBlur={() => setIsEditingPath(false)}
               autoFocus
-              className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-blue-500 rounded-md outline-none text-neutral-800"
+              className="w-full px-3 py-1 text-xs bg-neutral-50 border border-blue-500 rounded-md outline-hidden text-neutral-800"
             />
           </form>
         ) : (
@@ -188,7 +159,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
               <Folder className="w-3.5 h-3.5 text-amber-500 shrink-0" />
 
               {segments.length === 0 ? (
-                <span className="text-neutral-400 italic">No folder open</span>
+                <span className="text-neutral-400 italic">Chưa mở thư mục</span>
               ) : (
                 segments.map((segment, idx) => (
                   <React.Fragment key={idx}>
@@ -215,7 +186,7 @@ export const AddressBar: React.FC<AddressBarProps> = ({
                 id="btn-copy-address"
                 onClick={handleCopyPath}
                 className="p-1 text-neutral-400 hover:text-neutral-700 rounded hover:bg-neutral-200/60 ml-1 transition-colors"
-                title="Copy path"
+                title="Sao chép đường dẫn"
               >
                 {copied ? (
                   <Check className="w-3 h-3 text-emerald-600" />
@@ -236,15 +207,13 @@ export const AddressBar: React.FC<AddressBarProps> = ({
             id="input-file-search"
             type="text"
             placeholder={
-              activeSpace
-                ? `Tìm trong ${activeSpace.name}...`
-                : segments.length > 0
-                ? `Search ${segments[segments.length - 1]}`
-                : 'Search files...'
+              segments.length > 0
+                ? `Tìm trong ${segments[segments.length - 1]}...`
+                : 'Tìm kiếm tệp...'
             }
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full bg-transparent text-xs text-neutral-800 placeholder-neutral-400 outline-none"
+            className="w-full bg-transparent text-xs text-neutral-800 placeholder-neutral-400 outline-hidden"
           />
           {searchQuery && (
             <button

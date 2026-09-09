@@ -1,5 +1,5 @@
 import React from 'react';
-import { List, LayoutGrid, Columns, Laptop, Globe } from 'lucide-react';
+import { List, LayoutGrid, Columns, Layers, Laptop, Globe } from 'lucide-react';
 import { ViewMode, FileItem } from '../types';
 import { formatFileSize } from '../services/fs';
 
@@ -28,14 +28,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     >
       {/* Left: item counter and selection info */}
       <div className="flex items-center gap-4">
-        <span>{totalCount} {totalCount === 1 ? 'item' : 'items'}</span>
+        <span>{totalCount} {totalCount === 1 ? 'mục' : 'mục'}</span>
 
         {selectedCount > 0 && (
           <>
             <span className="text-neutral-300">|</span>
             <span>
-              {selectedCount} {selectedCount === 1 ? 'item selected' : 'items selected'}
-              {selectedSize > 0 && `  ${formatFileSize(selectedSize)}`}
+              Đã chọn {selectedCount} mục
+              {selectedSize > 0 && ` (${formatFileSize(selectedSize)})`}
             </span>
           </>
         )}
@@ -47,12 +47,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           {isNative ? (
             <>
               <Laptop className="w-3.5 h-3.5 text-blue-600" />
-              <span>Native Windows 11</span>
+              <span>Native Windows (64-bit)</span>
             </>
           ) : (
             <>
               <Globe className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Real Local Filesystem Access</span>
+              <span>Hệ Thống Tệp Trực Tiếp</span>
             </>
           )}
         </div>
@@ -66,7 +66,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             className={`p-1 rounded transition-colors ${
               viewMode === 'details' ? 'bg-neutral-200 text-blue-700' : 'hover:bg-neutral-200 text-neutral-600'
             }`}
-            title="Details"
+            title="Chi tiết (Details)"
           >
             <List className="w-3 h-3" />
           </button>
@@ -77,7 +77,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             className={`p-1 rounded transition-colors ${
               viewMode === 'grid' ? 'bg-neutral-200 text-blue-700' : 'hover:bg-neutral-200 text-neutral-600'
             }`}
-            title="Large icons"
+            title="Biểu tượng lớn (Icons)"
           >
             <LayoutGrid className="w-3 h-3" />
           </button>
@@ -88,9 +88,20 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             className={`p-1 rounded transition-colors ${
               viewMode === 'tiles' ? 'bg-neutral-200 text-blue-700' : 'hover:bg-neutral-200 text-neutral-600'
             }`}
-            title="Tiles"
+            title="Thẻ (Tiles)"
           >
             <Columns className="w-3 h-3" />
+          </button>
+
+          <button
+            id="btn-status-view-zones"
+            onClick={() => onViewModeChange('zones')}
+            className={`p-1 rounded transition-colors ${
+              viewMode === 'zones' ? 'bg-blue-600 text-white' : 'hover:bg-neutral-200 text-neutral-600'
+            }`}
+            title="Hộp Khu Vực (Smart Zones)"
+          >
+            <Layers className="w-3 h-3" />
           </button>
         </div>
       </div>

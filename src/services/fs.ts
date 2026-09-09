@@ -14,15 +14,33 @@ let activeRootName = '';
 export async function loadUserPreferences(): Promise<UserPreferences> {
   const defaultPrefs: UserPreferences = {
     pinnedFolders: [],
-    customSpaces: [
+    smartZones: [
       {
-        id: 'space_default_hub',
-        name: 'Khu vực làm việc chính',
+        id: 'zone_recent_downloads',
+        name: 'Mới Tải Về & Cập Nhật (24h)',
         color: 'blue',
-        icon: 'sparkles',
-        description: 'Gom các file quan trọng từ nhiều thư mục khác nhau vào đây để truy cập nhanh',
-        createdAt: Date.now(),
-        items: [],
+        width: 'col-1',
+        displayStyle: 'compact',
+        collapsed: false,
+        rule: { ruleType: 'recent', recentHours: 24 },
+      },
+      {
+        id: 'zone_archives_setup',
+        name: 'File Nén & Giải Nén (Zip, Rar, Exe)',
+        color: 'purple',
+        width: 'col-1',
+        displayStyle: 'icons',
+        collapsed: false,
+        rule: { ruleType: 'category', category: 'archives' },
+      },
+      {
+        id: 'zone_documents',
+        name: 'Tài Liệu & Báo Cáo',
+        color: 'emerald',
+        width: 'col-1',
+        displayStyle: 'details',
+        collapsed: false,
+        rule: { ruleType: 'category', category: 'documents' },
       },
     ],
     theme: 'light',
@@ -39,7 +57,7 @@ export async function loadUserPreferences(): Promise<UserPreferences> {
       return {
         ...defaultPrefs,
         ...prefs,
-        customSpaces: prefs.customSpaces || defaultPrefs.customSpaces,
+        smartZones: Array.isArray(prefs.smartZones) ? prefs.smartZones : defaultPrefs.smartZones,
       };
     } catch {
       // Fallback to localStorage if Tauri command unavailable
@@ -53,7 +71,7 @@ export async function loadUserPreferences(): Promise<UserPreferences> {
       return {
         ...defaultPrefs,
         ...parsed,
-        customSpaces: Array.isArray(parsed.customSpaces) ? parsed.customSpaces : defaultPrefs.customSpaces,
+        smartZones: Array.isArray(parsed.smartZones) ? parsed.smartZones : defaultPrefs.smartZones,
       };
     }
   } catch {

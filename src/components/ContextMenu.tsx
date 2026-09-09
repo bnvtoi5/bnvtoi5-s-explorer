@@ -12,16 +12,15 @@ import {
   RefreshCw,
   Layers,
   ChevronRight,
-  Plus,
 } from 'lucide-react';
-import { FileItem, CustomSpace } from '../types';
+import { FileItem, SmartZone } from '../types';
 
 interface ContextMenuProps {
   x: number;
   y: number;
   item: FileItem | null;
   pinnedFolders: string[];
-  customSpaces: CustomSpace[];
+  smartZones?: SmartZone[];
   onClose: () => void;
   onOpen: (item: FileItem) => void;
   onPin: (path: string) => void;
@@ -32,27 +31,15 @@ interface ContextMenuProps {
   onCreateFolder: () => void;
   onCreateFile: () => void;
   onRefresh: () => void;
-  onAddItemToSpace: (spaceId: string, item: FileItem) => void;
-  onCreateNewSpace: () => void;
+  onAssignToZone?: (zoneId: string, item: FileItem) => void;
 }
-
-const COLOR_DOTS: Record<string, string> = {
-  blue: 'bg-blue-500',
-  purple: 'bg-purple-500',
-  emerald: 'bg-emerald-500',
-  amber: 'bg-amber-500',
-  rose: 'bg-rose-500',
-  indigo: 'bg-indigo-500',
-  cyan: 'bg-cyan-500',
-  slate: 'bg-slate-500',
-};
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({
   x,
   y,
   item,
   pinnedFolders,
-  customSpaces,
+  smartZones = [],
   onClose,
   onOpen,
   onPin,
@@ -63,11 +50,10 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onCreateFolder,
   onCreateFile,
   onRefresh,
-  onAddItemToSpace,
-  onCreateNewSpace,
+  onAssignToZone,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [showSpacesSubmenu, setShowSpacesSubmenu] = useState(false);
+  const [showZonesSubmenu, setShowZonesSubmenu] = useState(false);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -79,10 +65,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  // Adjust coordinates so menu doesn't overflow screen
   const adjustedX = Math.min(x, window.innerWidth - 240);
   const adjustedY = Math.min(y, window.innerHeight - 340);
-
   const isPinned = item?.isDir && pinnedFolders.includes(item.path);
 
   return (
@@ -93,7 +77,6 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       className="fixed z-50 w-56 bg-white/95 backdrop-blur-md border border-neutral-200 rounded-xl shadow-xl py-1 text-xs text-neutral-800 animate-in fade-in zoom-in-95 duration-75 select-none"
     >
       {item ? (
-        // Item specific actions
         <>
           <button
             id="ctx-open-item"
@@ -104,65 +87,48 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-blue-50 hover:text-blue-700 transition-colors"
           >
             <FolderOpen className="w-4 h-4 text-blue-500" />
-            <span className="font-medium">Open</span>
+            <span className="font-medium">Mở</span>
           </button>
 
-          {/* Add to Custom Space submenu */}
-          <div
-            className="relative"
-            onMouseEnter={() => setShowSpacesSubmenu(true)}
-            onMouseLeave={() => setShowSpacesSubmenu(false)}
-          >
-            <button
-              id="ctx-add-to-space"
-              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-100 transition-colors"
+          {/* Optional Assign to Smart Zone */}
+          {smartZones.length > 0 && onAssignToZone && (
+            <div
+              className="relative"
+              onMouseEnter={() => setShowZonesSubmenu(true)}
+              onMouseLeave={() => setShowZonesSubmenu(false)}
             >
-              <div className="flex items-center gap-2.5">
-                <Layers className="w-4 h-4 text-blue-600" />
-                <span className="font-medium">Gôm vào Không Gian...</span>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />
-            </button>
-
-            {/* Flyout Submenu */}
-            {showSpacesSubmenu && (
-              <div
-                className="absolute left-full -top-1 ml-1 w-52 bg-white/95 backdrop-blur-md border border-neutral-200 rounded-xl shadow-xl py-1 text-xs text-neutral-800 animate-in fade-in duration-75 z-50"
+              <button
+                id="ctx-assign-zone"
+                className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-100 transition-colors"
               >
-                <div className="px-3 py-1 text-[10px] font-semibold text-neutral-400 uppercase">
-                  Chọn Không Gian
+                <div className="flex items-center gap-2.5">
+                  <Layers className="w-4 h-4 text-blue-600" />
+                  <span>Gán vào Hộp Khu Vực...</span>
                 </div>
+                <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />
+              </button>
 
-                {customSpaces.map((sp) => (
-                  <button
-                    key={sp.id}
-                    onClick={() => {
-                      onAddItemToSpace(sp.id, item);
-                      onClose();
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-blue-50 hover:text-blue-700 transition-colors text-left"
-                  >
-                    <div className={`w-2 h-2 rounded-full ${COLOR_DOTS[sp.color] || 'bg-blue-500'}`} />
-                    <span className="truncate flex-1">{sp.name}</span>
-                    <span className="text-[10px] text-neutral-400">{sp.items.length}</span>
-                  </button>
-                ))}
-
-                <div className="border-t border-neutral-100 my-1" />
-
-                <button
-                  onClick={() => {
-                    onCreateNewSpace();
-                    onClose();
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-neutral-100 text-blue-600 font-medium transition-colors text-left"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>+ Tạo Không Gian Mới</span>
-                </button>
-              </div>
-            )}
-          </div>
+              {showZonesSubmenu && (
+                <div className="absolute left-full -top-1 ml-1 w-52 bg-white/95 backdrop-blur-md border border-neutral-200 rounded-xl shadow-xl py-1 text-xs text-neutral-800 z-50 animate-in fade-in duration-75">
+                  <div className="px-3 py-1 text-[10px] font-semibold text-neutral-400 uppercase">
+                    Chọn Hộp
+                  </div>
+                  {smartZones.map((z) => (
+                    <button
+                      key={z.id}
+                      onClick={() => {
+                        onAssignToZone(z.id, item);
+                        onClose();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-blue-50 hover:text-blue-700 transition-colors text-left"
+                    >
+                      <span className="truncate flex-1">{z.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {item.isDir && (
             <button
@@ -180,12 +146,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               {isPinned ? (
                 <>
                   <PinOff className="w-4 h-4 text-neutral-500" />
-                  <span>Unpin from Quick Access</span>
+                  <span>Bỏ ghim khỏi Truy Cập Nhanh</span>
                 </>
               ) : (
                 <>
                   <Pin className="w-4 h-4 text-neutral-500" />
-                  <span>Pin to Quick Access</span>
+                  <span>Ghim vào Truy Cập Nhanh</span>
                 </>
               )}
             </button>
@@ -200,7 +166,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
             <Copy className="w-4 h-4 text-neutral-500" />
-            <span>Copy path</span>
+            <span>Sao chép đường dẫn</span>
           </button>
 
           <div className="border-t border-neutral-200 my-1" />
@@ -214,7 +180,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
             <Edit2 className="w-4 h-4 text-neutral-500" />
-            <span>Rename</span>
+            <span>Đổi tên</span>
           </button>
 
           <button
@@ -226,7 +192,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-red-50 text-red-600 transition-colors"
           >
             <Trash2 className="w-4 h-4 text-red-500" />
-            <span>Delete</span>
+            <span>Xóa</span>
           </button>
 
           <div className="border-t border-neutral-200 my-1" />
@@ -240,28 +206,13 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
             <Info className="w-4 h-4 text-neutral-500" />
-            <span>Properties</span>
+            <span>Thuộc tính (Properties)</span>
           </button>
         </>
       ) : (
-        // Background canvas context menu
         <>
           <button
-            id="ctx-bg-refresh"
-            onClick={() => {
-              onRefresh();
-              onClose();
-            }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4 text-neutral-500" />
-            <span>Refresh</span>
-          </button>
-
-          <div className="border-t border-neutral-200 my-1" />
-
-          <button
-            id="ctx-bg-new-folder"
+            id="ctx-new-folder"
             onClick={() => {
               onCreateFolder();
               onClose();
@@ -269,11 +220,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
             <FolderPlus className="w-4 h-4 text-amber-500" />
-            <span>New folder</span>
+            <span>Thư mục mới</span>
           </button>
 
           <button
-            id="ctx-bg-new-file"
+            id="ctx-new-file"
             onClick={() => {
               onCreateFile();
               onClose();
@@ -281,27 +232,27 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
             <FilePlus className="w-4 h-4 text-blue-500" />
-            <span>New text document</span>
+            <span>Tập tin văn bản mới (.txt)</span>
           </button>
 
           <div className="border-t border-neutral-200 my-1" />
 
           <button
-            id="ctx-bg-new-space"
+            id="ctx-refresh"
             onClick={() => {
-              onCreateNewSpace();
+              onRefresh();
               onClose();
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 text-blue-600 transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
-            <Layers className="w-4 h-4 text-blue-600" />
-            <span>+ Tạo Không Gian Mới</span>
+            <RefreshCw className="w-4 h-4 text-neutral-500" />
+            <span>Làm mới (Refresh)</span>
           </button>
 
           <div className="border-t border-neutral-200 my-1" />
 
           <button
-            id="ctx-bg-properties"
+            id="ctx-properties-bg"
             onClick={() => {
               onShowProperties(null);
               onClose();
@@ -309,7 +260,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-neutral-100 transition-colors"
           >
             <Info className="w-4 h-4 text-neutral-500" />
-            <span>Properties</span>
+            <span>Thuộc tính thư mục</span>
           </button>
         </>
       )}

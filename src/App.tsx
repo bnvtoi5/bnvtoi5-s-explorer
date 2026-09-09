@@ -4,14 +4,8 @@ import {
   DriveInfo,
   KnownFolder,
   UserPreferences,
-  ViewMode,
-  SortField,
-  SortOrder,
   ContextMenuState,
-  CustomSpace,
-  CustomSpaceItem,
-  SpaceColor,
-  SpaceIcon,
+  SmartZone,
 } from './types';
 import {
   isTauri,
@@ -29,15 +23,12 @@ import { CommandBar } from './components/CommandBar';
 import { AddressBar } from './components/AddressBar';
 import { Sidebar } from './components/Sidebar';
 import { FileListView } from './components/FileListView';
-import { CustomSpaceView } from './components/CustomSpaceView';
-import { CustomSpaceModal } from './components/CustomSpaceModal';
+import { SmartZonesView } from './components/SmartZonesView';
 import { ContextMenu } from './components/ContextMenu';
 import { PropertiesModal } from './components/PropertiesModal';
 import { FilePreviewModal } from './components/FilePreviewModal';
-import { InstallerGuideModal } from './components/InstallerGuideModal';
 import { InputModal, ModalType } from './components/InputModal';
 import { StatusBar } from './components/StatusBar';
-import { CheckCircle2, Layers } from 'lucide-react';
 
 export default function App() {
   // Navigation & Directory state
@@ -52,18 +43,36 @@ export default function App() {
   // Selection state
   const [selectedItems, setSelectedItems] = useState<FileItem[]>([]);
 
-  // System & Preferences state
+  // Preferences state
   const [preferences, setPreferences] = useState<UserPreferences>({
     pinnedFolders: [],
-    customSpaces: [
+    smartZones: [
       {
-        id: 'space_default_hub',
-        name: 'Khu vực làm việc chính',
+        id: 'zone_recent_downloads',
+        name: 'Mới Tải Về & Sửa Đổi (24h)',
         color: 'blue',
-        icon: 'sparkles',
-        description: 'Gom các file quan trọng từ nhiều thư mục khác nhau vào đây để truy cập nhanh',
-        createdAt: Date.now(),
-        items: [],
+        width: 'col-1',
+        displayStyle: 'compact',
+        collapsed: false,
+        rule: { ruleType: 'recent', recentHours: 24 },
+      },
+      {
+        id: 'zone_archives_setup',
+        name: 'File Nén & Giải Nén (Zip, Rar, Exe)',
+        color: 'purple',
+        width: 'col-1',
+        displayStyle: 'icons',
+        collapsed: false,
+        rule: { ruleType: 'category', category: 'archives' },
+      },
+      {
+        id: 'zone_documents',
+        name: 'Tài Liệu & Báo Cáo',
+        color: 'emerald',
+        width: 'col-1',
+        displayStyle: 'details',
+        collapsed: false,
+        rule: { ruleType: 'category', category: 'documents' },
       },
     ],
     theme: 'light',
@@ -71,18 +80,10 @@ export default function App() {
     showHiddenFiles: false,
     sortBy: 'name',
     sortOrder: 'asc',
-    activeSpaceId: null,
   });
+
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [knownFolders, setKnownFolders] = useState<KnownFolder[]>([]);
-
-  // Active Custom Space State
-  const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
-  const [isSpaceModalOpen, setIsSpaceModalOpen] = useState<boolean>(false);
-  const [editingSpace, setEditingSpace] = useState<CustomSpace | null>(null);
-
-  // Toast Notification
-  const [toastMessage, setToastMessage] = useState<{ id: number; title: string; desc: string } | null>(null);
 
   // Context Menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -108,24 +109,12 @@ export default function App() {
     type: null,
     isOpen: false,
   });
-  const [isInstallerGuideOpen, setIsInstallerGuideOpen] = useState<boolean>(false);
-
-  const showToast = (title: string, desc: string) => {
-    const id = Date.now();
-    setToastMessage({ id, title, desc });
-    setTimeout(() => {
-      setToastMessage((cur) => (cur?.id === id ? null : cur));
-    }, 3500);
-  };
 
   // Load initial settings and drives
   useEffect(() => {
     async function init() {
       const prefs = await loadUserPreferences();
       setPreferences(prefs);
-      if (prefs.activeSpaceId) {
-        setActiveSpaceId(prefs.activeSpaceId);
-      }
 
       const sysDrives = await getSystemDrives();
       setDrives(sysDrives);
@@ -133,13 +122,10 @@ export default function App() {
       const kf = await getKnownFolders();
       setKnownFolders(kf);
 
-      // In Tauri or if lastVisitedPath is set, open initial folder if no space active
-      if (!prefs.activeSpaceId) {
-        if (isTauri() && sysDrives.length > 0) {
-          navigateTo(sysDrives[0].path, false);
-        } else if (prefs.lastVisitedPath) {
-          navigateTo(prefs.lastVisitedPath, false);
-        }
+      if (isTauri() && sysDrives.length > 0) {
+        navigateTo(sysDrives[0].path, false);
+      } else if (prefs.lastVisitedPath) {
+        navigateTo(prefs.lastVisitedPath, false);
       }
     }
     init();
@@ -191,10 +177,6 @@ export default function App() {
     (newPath: string, pushHistory = true) => {
       if (!newPath) return;
 
-      // Exiting space when navigating to path
-      setActiveSpaceId(null);
-      updatePreferences((p) => ({ ...p, activeSpaceId: null }));
-
       if (pushHistory) {
         setHistory((prev) => {
           const updated = prev.slice(0, historyIndex + 1);
@@ -206,222 +188,35 @@ export default function App() {
       setCurrentPath(newPath);
       setSearchQuery('');
       loadDirectory(newPath);
+      updatePreferences((p) => ({ ...p, lastVisitedPath: newPath }));
     },
     [historyIndex, loadDirectory, updatePreferences]
   );
 
-  // Custom Space navigation
-  const handleSelectSpace = (spaceId: string) => {
-    setActiveSpaceId(spaceId);
-    updatePreferences((p) => ({ ...p, activeSpaceId: spaceId }));
+  // Update Smart Zones
+  const handleUpdateSmartZones = (newZones: SmartZone[]) => {
+    updatePreferences((prev) => ({ ...prev, smartZones: newZones }));
   };
 
-  const handleExitSpace = () => {
-    setActiveSpaceId(null);
-    updatePreferences((p) => ({ ...p, activeSpaceId: null }));
-    if (currentPath) {
-      loadDirectory(currentPath);
-    }
-  };
-
-  // Custom Space Management: Create, Edit, Delete
-  const handleOpenCreateSpace = () => {
-    setEditingSpace(null);
-    setIsSpaceModalOpen(true);
-  };
-
-  const handleOpenEditSpace = (space: CustomSpace) => {
-    setEditingSpace(space);
-    setIsSpaceModalOpen(true);
-  };
-
-  const handleSaveSpace = (data: {
-    name: string;
-    description: string;
-    color: SpaceColor;
-    icon: SpaceIcon;
-  }) => {
-    if (editingSpace) {
-      // Edit existing
-      updatePreferences((prev) => ({
-        ...prev,
-        customSpaces: prev.customSpaces.map((s) =>
-          s.id === editingSpace.id ? { ...s, ...data } : s
-        ),
-      }));
-      showToast('Đã lưu thay đổi', `Không gian "${data.name}" đã được cập nhật`);
-    } else {
-      // Create new
-      const newSpace: CustomSpace = {
-        id: 'space_' + Date.now(),
-        name: data.name,
-        description: data.description,
-        color: data.color,
-        icon: data.icon,
-        createdAt: Date.now(),
-        items: [],
-      };
-      updatePreferences((prev) => ({
-        ...prev,
-        customSpaces: [...prev.customSpaces, newSpace],
-        activeSpaceId: newSpace.id,
-      }));
-      setActiveSpaceId(newSpace.id);
-      showToast('Đã tạo Không Gian Mới', `Đã tạo "${data.name}". Hãy gôm các file bạn muốn vào đây!`);
-    }
-  };
-
-  const handleDeleteSpace = (spaceId: string) => {
-    const space = preferences.customSpaces.find((s) => s.id === spaceId);
-    if (!space) return;
-
-    if (confirm(`Bạn có chắc muốn xóa không gian "${space.name}"? (Các file gốc trên máy tính sẽ KHÔNG bị xóa)`)) {
-      updatePreferences((prev) => ({
-        ...prev,
-        customSpaces: prev.customSpaces.filter((s) => s.id !== spaceId),
-        activeSpaceId: prev.activeSpaceId === spaceId ? null : prev.activeSpaceId,
-      }));
-
-      if (activeSpaceId === spaceId) {
-        setActiveSpaceId(null);
-      }
-      showToast('Đã xóa không gian', `Không gian "${space.name}" đã được gỡ bỏ`);
-    }
-  };
-
-  // Add Item(s) to Space
-  const handleAddItemToSpace = (spaceId: string, item: FileItem) => {
-    const targetSpace = preferences.customSpaces.find((s) => s.id === spaceId);
-    if (!targetSpace) return;
-
-    // Check if already in space
-    const alreadyExists = targetSpace.items.some((it) => it.path === item.path);
-    if (alreadyExists) {
-      showToast('Mục đã có trong Không Gian', `"${item.name}" đã nằm trong "${targetSpace.name}"`);
-      return;
-    }
-
-    const newItem: CustomSpaceItem = {
-      id: 'it_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      name: item.name,
-      path: item.path,
-      isDir: item.isDir,
-      size: item.size,
-      modifiedMs: item.modifiedMs,
-      extension: item.extension,
-      addedAt: Date.now(),
-      handle: item.handle,
-    };
-
+  // Assign item to a zone
+  const handleAssignItemToZone = (zoneId: string, item: FileItem) => {
     updatePreferences((prev) => ({
       ...prev,
-      customSpaces: prev.customSpaces.map((s) =>
-        s.id === spaceId ? { ...s, items: [newItem, ...s.items] } : s
-      ),
+      smartZones: prev.smartZones.map((z) => {
+        if (z.id === zoneId) {
+          const cur = z.rule.manualItemPaths || [];
+          return {
+            ...z,
+            rule: {
+              ...z.rule,
+              ruleType: 'manual',
+              manualItemPaths: cur.includes(item.path) ? cur : [...cur, item.path],
+            },
+          };
+        }
+        return z;
+      }),
     }));
-
-    showToast('Đã gôm vào Không Gian', `Đã thêm "${item.name}" vào "${targetSpace.name}"`);
-  };
-
-  const handleAddMultipleSelectedToSpace = (spaceId: string) => {
-    if (selectedItems.length === 0) return;
-    const targetSpace = preferences.customSpaces.find((s) => s.id === spaceId);
-    if (!targetSpace) return;
-
-    let addedCount = 0;
-    const newItems: CustomSpaceItem[] = [];
-
-    for (const item of selectedItems) {
-      if (!targetSpace.items.some((it) => it.path === item.path)) {
-        newItems.push({
-          id: 'it_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-          name: item.name,
-          path: item.path,
-          isDir: item.isDir,
-          size: item.size,
-          modifiedMs: item.modifiedMs,
-          extension: item.extension,
-          addedAt: Date.now(),
-          handle: item.handle,
-        });
-        addedCount++;
-      }
-    }
-
-    if (newItems.length > 0) {
-      updatePreferences((prev) => ({
-        ...prev,
-        customSpaces: prev.customSpaces.map((s) =>
-          s.id === spaceId ? { ...s, items: [...newItems, ...s.items] } : s
-        ),
-      }));
-    }
-
-    showToast(
-      'Gôm file thành công',
-      `Đã gom ${addedCount} mục vào không gian "${targetSpace.name}"`
-    );
-  };
-
-  const handleRemoveItemFromSpace = (spaceId: string, itemId: string) => {
-    updatePreferences((prev) => ({
-      ...prev,
-      customSpaces: prev.customSpaces.map((s) =>
-        s.id === spaceId
-          ? { ...s, items: s.items.filter((it) => it.id !== itemId) }
-          : s
-      ),
-    }));
-  };
-
-  const handleUpdateItemNote = (spaceId: string, itemId: string, note: string) => {
-    updatePreferences((prev) => ({
-      ...prev,
-      customSpaces: prev.customSpaces.map((s) =>
-        s.id === spaceId
-          ? {
-              ...s,
-              items: s.items.map((it) =>
-                it.id === itemId ? { ...it, note } : it
-              ),
-            }
-          : s
-      ),
-    }));
-  };
-
-  // Drop files directly from desktop / browser into active space
-  const handleDropFilesIntoSpace = (files: FileList) => {
-    if (!activeSpaceId) return;
-    const targetSpace = preferences.customSpaces.find((s) => s.id === activeSpaceId);
-    if (!targetSpace) return;
-
-    const newItems: CustomSpaceItem[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      newItems.push({
-        id: 'it_drop_' + Date.now() + '_' + i,
-        name: file.name,
-        path: (file as unknown as { webkitRelativePath?: string }).webkitRelativePath || file.name,
-        isDir: false,
-        size: file.size,
-        modifiedMs: file.lastModified,
-        extension: file.name.split('.').pop() || '',
-        addedAt: Date.now(),
-      });
-    }
-
-    updatePreferences((prev) => ({
-      ...prev,
-      customSpaces: prev.customSpaces.map((s) =>
-        s.id === activeSpaceId ? { ...s, items: [...newItems, ...s.items] } : s
-      ),
-    }));
-
-    showToast(
-      'Đã thả file vào Không Gian',
-      `Đã gôm ${files.length} file vào "${targetSpace.name}"`
-    );
   };
 
   // History navigation
@@ -482,7 +277,7 @@ export default function App() {
 
   // Search real files
   useEffect(() => {
-    if (!searchQuery.trim() || !currentPath || activeSpaceId) {
+    if (!searchQuery.trim() || !currentPath) {
       setSearchResults([]);
       return;
     }
@@ -493,15 +288,14 @@ export default function App() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, currentPath, activeSpaceId]);
+  }, [searchQuery, currentPath]);
 
-  // Sort and filter displayed items in normal explorer
+  // Sort and filter displayed items
   const displayedItems = useMemo(() => {
     const raw = searchQuery.trim() ? searchResults : items;
     const sorted = [...raw];
 
     sorted.sort((a, b) => {
-      // Folders always first
       if (a.isDir && !b.isDir) return -1;
       if (!a.isDir && b.isDir) return 1;
 
@@ -615,7 +409,7 @@ export default function App() {
     const firstItem = selectedItems[0];
     setInputModal({
       type: 'confirm-delete',
-      itemName: selectedItems.length > 1 ? `${selectedItems.length} items` : firstItem.name,
+      itemName: selectedItems.length > 1 ? `${selectedItems.length} mục` : firstItem.name,
       targetItem: firstItem,
       isOpen: true,
     });
@@ -680,12 +474,6 @@ export default function App() {
     }
   };
 
-  // Active space object
-  const activeCustomSpace = useMemo(() => {
-    if (!activeSpaceId) return null;
-    return preferences.customSpaces.find((s) => s.id === activeSpaceId) || null;
-  }, [activeSpaceId, preferences.customSpaces]);
-
   return (
     <div
       id="explorer-root-container"
@@ -712,11 +500,6 @@ export default function App() {
         onDeleteSelected={handleDeleteSelected}
         onRenameSelected={handleRenameSelected}
         onRefresh={handleRefresh}
-        onOpenInstallerGuide={() => setIsInstallerGuideOpen(true)}
-        customSpaces={preferences.customSpaces}
-        onAddSelectedToSpace={handleAddMultipleSelectedToSpace}
-        onCreateNewSpace={handleOpenCreateSpace}
-        activeSpaceId={activeSpaceId}
       />
 
       {/* 2. Address & Search Bar */}
@@ -732,24 +515,16 @@ export default function App() {
         onNavigateToPath={(path) => navigateTo(path)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        activeSpace={activeCustomSpace}
-        onExitSpace={handleExitSpace}
       />
 
-      {/* 3. Main Body: Sidebar + Main Content (Explorer FileListView or CustomSpaceView) */}
+      {/* 3. Main Body: Sidebar + File List / Smart Zones View */}
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
           currentPath={currentPath}
           pinnedFolders={preferences.pinnedFolders}
           drives={drives}
           knownFolders={knownFolders}
-          customSpaces={preferences.customSpaces}
-          activeSpaceId={activeSpaceId}
           onNavigateToPath={(path) => navigateTo(path)}
-          onSelectSpace={handleSelectSpace}
-          onCreateSpace={handleOpenCreateSpace}
-          onEditSpace={handleOpenEditSpace}
-          onDeleteSpace={handleDeleteSpace}
           onUnpinFolder={handleUnpinFolder}
           onOpenFolderPicker={handleOpenFolderPicker}
         />
@@ -759,27 +534,21 @@ export default function App() {
             <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-600 animate-pulse z-20" />
           )}
 
-          {activeCustomSpace ? (
-            /* ACTIVE CUSTOM SPACE VIEW */
-            <CustomSpaceView
-              space={activeCustomSpace}
-              viewMode={preferences.viewMode}
-              sortBy={preferences.sortBy}
-              sortOrder={preferences.sortOrder}
-              onSortChange={(field, order) =>
-                updatePreferences((p) => ({ ...p, sortBy: field, sortOrder: order }))
-              }
-              onNavigateToRealFolder={(path) => navigateTo(path)}
-              onPreviewItem={(item) => setPreviewItem(item)}
-              onRemoveItemFromSpace={handleRemoveItemFromSpace}
-              onUpdateItemNote={handleUpdateItemNote}
-              onEditSpace={handleOpenEditSpace}
-              onDeleteSpace={handleDeleteSpace}
-              onOpenFolderToCollect={handleOpenFolderPicker}
-              onDropFilesIntoSpace={handleDropFilesIntoSpace}
+          {preferences.viewMode === 'zones' ? (
+            /* SMART ZONES / DYNAMIC BOX VIEW */
+            <SmartZonesView
+              items={displayedItems}
+              currentPath={currentPath}
+              zones={preferences.smartZones}
+              onUpdateZones={handleUpdateSmartZones}
+              selectedItems={selectedItems}
+              onSelectItem={handleSelectItem}
+              onOpenItem={handleOpenItem}
+              onContextMenu={handleContextMenu}
+              onOpenFolderPicker={handleOpenFolderPicker}
             />
           ) : (
-            /* STANDARD EXPLORER FILE LIST VIEW */
+            /* STANDARD EXPLORER LIST / GRID / TILES VIEW */
             <FileListView
               items={displayedItems}
               currentPath={currentPath}
@@ -802,37 +571,21 @@ export default function App() {
 
       {/* 4. Status Bar */}
       <StatusBar
-        totalCount={activeCustomSpace ? activeCustomSpace.items.length : displayedItems.length}
-        selectedItems={activeCustomSpace ? [] : selectedItems}
+        totalCount={displayedItems.length}
+        selectedItems={selectedItems}
         viewMode={preferences.viewMode}
         onViewModeChange={(mode) => updatePreferences((p) => ({ ...p, viewMode: mode }))}
         isNative={isTauri()}
       />
 
-      {/* 5. Floating Toast Notification */}
-      {toastMessage && (
-        <div
-          id="explorer-toast-notification"
-          className="fixed bottom-10 right-6 z-50 flex items-center gap-3 bg-neutral-900/95 text-white px-4 py-3 rounded-xl shadow-2xl border border-neutral-700/60 backdrop-blur-md animate-in slide-in-from-bottom-5 fade-in duration-150 max-w-md"
-        >
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-5 h-5" />
-          </div>
-          <div className="min-w-0 flex-1 text-xs">
-            <div className="font-semibold text-neutral-100">{toastMessage.title}</div>
-            <div className="text-neutral-300 text-[11px] truncate mt-0.5">{toastMessage.desc}</div>
-          </div>
-        </div>
-      )}
-
-      {/* 6. Context Menu */}
+      {/* 5. Context Menu */}
       {contextMenu.isOpen && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           item={contextMenu.item}
           pinnedFolders={preferences.pinnedFolders}
-          customSpaces={preferences.customSpaces}
+          smartZones={preferences.smartZones}
           onClose={() => setContextMenu((prev) => ({ ...prev, isOpen: false }))}
           onOpen={(item) => handleOpenItem(item)}
           onPin={handlePinFolder}
@@ -858,20 +611,11 @@ export default function App() {
           onCreateFolder={handleCreateFolder}
           onCreateFile={handleCreateFile}
           onRefresh={handleRefresh}
-          onAddItemToSpace={handleAddItemToSpace}
-          onCreateNewSpace={handleOpenCreateSpace}
+          onAssignToZone={handleAssignItemToZone}
         />
       )}
 
-      {/* 7. Custom Space Modal (Create / Edit Space) */}
-      <CustomSpaceModal
-        isOpen={isSpaceModalOpen}
-        editingSpace={editingSpace}
-        onClose={() => setIsSpaceModalOpen(false)}
-        onSave={handleSaveSpace}
-      />
-
-      {/* 8. Properties Modal */}
+      {/* 6. Properties Modal */}
       {propertiesItem.isOpen && (
         <PropertiesModal
           item={propertiesItem.item}
@@ -880,7 +624,7 @@ export default function App() {
         />
       )}
 
-      {/* 9. File Preview Modal */}
+      {/* 7. File Preview Modal */}
       {previewItem && (
         <FilePreviewModal
           item={previewItem}
@@ -888,7 +632,7 @@ export default function App() {
         />
       )}
 
-      {/* 10. Input Modal (Rename, New Folder, Confirm Delete) */}
+      {/* 8. Input Modal (Rename, New Folder, Confirm Delete) */}
       <InputModal
         type={inputModal.type}
         initialValue={inputModal.initialValue}
@@ -898,11 +642,6 @@ export default function App() {
         onSubmit={handleModalSubmit}
         onConfirmDelete={handleConfirmDelete}
       />
-
-      {/* 11. Windows Installer & Packaging Guide Modal */}
-      {isInstallerGuideOpen && (
-        <InstallerGuideModal onClose={() => setIsInstallerGuideOpen(false)} />
-      )}
     </div>
   );
 }

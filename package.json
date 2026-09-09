@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "prebuild": "node scripts/ensure-win32-deps.mjs",
     "build": "vite build",
     "build:windows": "vite build && tauri build",
     "build:portable": "vite build && tauri build -- --no-bundle",
@@ -42,7 +43,10 @@
     "vite": "^6.2.3"
   },
   "optionalDependencies": {
+    "@esbuild/win32-x64": "0.25.12",
     "@rollup/rollup-win32-x64-msvc": "4.63.1",
+    "@tailwindcss/oxide-win32-x64-msvc": "4.3.3",
+    "@tauri-apps/cli-win32-x64-msvc": "2.11.4",
     "lightningcss-win32-x64-msvc": "1.32.0"
   }
 }

@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
 
 // CRC32 implementation for PNG chunks
 const crcTable = new Uint32Array(256);
@@ -181,8 +186,8 @@ function createICO(pngBuffers) {
 }
 
 // Ensure directories exist
-const tauriIconsDir = path.resolve('src-tauri', 'icons');
-const publicDir = path.resolve('public');
+const tauriIconsDir = path.resolve(projectRoot, 'src-tauri', 'icons');
+const publicDir = path.resolve(projectRoot, 'public');
 fs.mkdirSync(tauriIconsDir, { recursive: true });
 fs.mkdirSync(publicDir, { recursive: true });
 

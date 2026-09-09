@@ -1,6 +1,12 @@
 @echo off
+setlocal enabledelayedexpansion
+
+REM Ensure working directory is the project root
+cd /d "%~dp0.."
+
 echo =======================================================
 echo   Explorer App - Windows Installer and Portable Builder
+echo   Root Directory: %CD%
 echo =======================================================
 echo.
 
@@ -23,10 +29,14 @@ if %errorlevel% neq 0 (
 
 echo [1/4] Installing dependencies...
 call npm install
-call npm install --no-save @rollup/rollup-win32-x64-msvc@4.63.1 lightningcss-win32-x64-msvc@1.32.0
+call npm install --no-save @rollup/rollup-win32-x64-msvc@4.63.1 lightningcss-win32-x64-msvc@1.32.0 @tailwindcss/oxide-win32-x64-msvc@4.3.3 @esbuild/win32-x64@0.25.12 @tauri-apps/cli-win32-x64-msvc@2.11.4
 
 echo [2/4] Generating Windows application icons...
-call node scripts/generate-icons.mjs
+if exist "%~dp0generate-icons.mjs" (
+    call node "%~dp0generate-icons.mjs"
+) else (
+    call node "scripts/generate-icons.mjs"
+)
 
 echo [3/4] Building Vite frontend distribution...
 call npm run build

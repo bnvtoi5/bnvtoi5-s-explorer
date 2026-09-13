@@ -21,6 +21,7 @@ import {
   openRealItem,
   moveOrCopyRealItems,
   renameRealItem,
+  checkIsDirectory,
 } from './services/fs';
 import { CommandBar } from './components/CommandBar';
 import { AddressBar } from './components/AddressBar';
@@ -189,8 +190,31 @@ export default function App() {
 
   // Navigate to path with history tracking
   const navigateTo = useCallback(
-    (newPath: string, pushHistory = true) => {
+    async (newPath: string, pushHistory = true) => {
       if (!newPath) return;
+
+      const isDir = await checkIsDirectory(newPath);
+      if (!isDir) {
+        // Direct file target -> open natively or preview
+        try {
+          await openRealItem(newPath);
+        } catch {
+          const fileName = newPath.split(/[/\\]/).pop() || newPath;
+          const dotIdx = fileName.lastIndexOf('.');
+          const ext = dotIdx > 0 ? fileName.substring(dotIdx + 1) : undefined;
+          setPreviewItem({
+            id: newPath,
+            name: fileName,
+            path: newPath,
+            isDir: false,
+            size: 0,
+            modifiedMs: Date.now(),
+            extension: ext,
+            isHidden: false,
+          });
+        }
+        return;
+      }
 
       if (pushHistory) {
         setHistory((prev) => {
@@ -770,6 +794,35 @@ export default function App() {
           drives={drives}
           knownFolders={knownFolders}
           onNavigateToPath={(path) => navigateTo(path)}
+          onOpenFile={async (filePath) => {
+            try {
+              await openRealItem(filePath);
+            } catch (err) {
+              console.warn('Cannot open file with native app:', err);
+              const fileName = filePath.split(/[/\\]/).pop() || filePath;
+              const dotIdx = fileName.lastIndexOf('.');
+              const ext = dotIdx > 0 ? fileName.substring(dotIdx + 1) : undefined;
+              setPreviewItem({
+                id: filePath,
+                name: fileName,
+                path: filePath,
+                isDir: false,
+                size: 0,
+                modifiedMs: Date.now(),
+                extension: ext,
+                isHidden: false,
+              });
+            }
+          }}
+          onLocateItem={(filePath) => {
+            const parent = filePath.substring(
+              0,
+              Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
+            );
+            if (parent) {
+              navigateTo(parent);
+            }
+          }}
           onPinFolder={handlePinFolder}
           onUnpinFolder={handleUnpinFolder}
           onOpenFolderPicker={handleOpenFolderPicker}

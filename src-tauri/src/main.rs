@@ -729,13 +729,19 @@ fn move_or_copy_items(
     Ok(result_items)
 }
 
+#[tauri::command]
+fn is_directory(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
 fn main() {
     #[cfg(target_os = "windows")]
     {
-        // Reduce Chromium WebView2 memory footprint closer to native Explorer (~60-75MB)
+        // Reduce Chromium WebView2 memory footprint closer to native Explorer (~60-90MB)
+        // Disables unnecessary background telemetry, crashpad reporter, component updates, and caps JS heap
         std::env::set_var(
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            "--disable-features=Translate,OptimizationHints,MediaRouter --disable-background-timer-throttling --js-flags=\"--max-old-space-size=128\""
+            "--disable-features=Translate,OptimizationHints,MediaRouter,CalculateNativeWinOcclusion,AutofillServerCommunication,CertificateTransparencyComponentUpdater --disable-background-networking --disable-component-update --disable-breakpad --disable-crash-reporter --no-default-browser-check --disable-domain-reliability --disable-client-side-phishing-detection --disable-hang-monitor --disable-ipc-flooding-protection --renderer-process-limit=1 --js-flags=\"--max-old-space-size=96\""
         );
     }
 
@@ -758,6 +764,7 @@ fn main() {
             extract_archive,
             create_template_file,
             move_or_copy_items,
+            is_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Explorer App");

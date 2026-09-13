@@ -54,6 +54,13 @@ export interface ZoneRuleConfig {
   manualItemPaths?: string[];   // Lưu đường dẫn các file đã được phân bộ vào hộp này
 }
 
+export interface ZoneFreeformLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface SmartZone {
   id: string;
   name: string;
@@ -62,12 +69,16 @@ export interface SmartZone {
   displayStyle: ZoneDisplayStyle;
   collapsed: boolean;
   rule: ZoneRuleConfig;
+  freeform?: ZoneFreeformLayout;
 }
+
+export type SmartZonesLayoutMode = 'grid' | 'freeform'; // 'Lưới thông minh' | 'Bố cục tự do'
 
 export interface UserPreferences {
   pinnedFolders: string[];
   smartZones: SmartZone[]; // Global / default Smart Zones
   folderSmartZones?: Record<string, SmartZone[]>; // Per-folder customized Smart Zones (e.g. Downloads, Documents)
+  smartZonesLayoutMode?: SmartZonesLayoutMode;
   theme: 'system' | 'dark' | 'light';
   viewMode: ViewMode;
   showHiddenFiles: boolean;

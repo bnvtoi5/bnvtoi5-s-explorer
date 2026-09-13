@@ -6,6 +6,8 @@ import {
   ZoneWidth,
   ZoneDisplayStyle,
   ZoneRuleType,
+  ZoneFreeformLayout,
+  SmartZonesLayoutMode,
 } from '../types';
 import {
   Folder,
@@ -36,6 +38,11 @@ import {
   ArrowUpDown,
   RotateCcw,
   PackageOpen,
+  LayoutGrid,
+  Lock,
+  Unlock,
+  Grid,
+  GripHorizontal,
 } from 'lucide-react';
 import {
   extractArchiveItem,
@@ -50,6 +57,8 @@ interface SmartZonesViewProps {
   currentPath: string;
   zones: SmartZone[];
   isCustomFolderConfig?: boolean;
+  layoutMode?: SmartZonesLayoutMode;
+  onLayoutModeChange?: (mode: SmartZonesLayoutMode) => void;
   onUpdateZones: (zones: SmartZone[]) => void;
   onResetFolderZones?: () => void;
   onRefresh?: () => void;
@@ -147,6 +156,8 @@ const WIDTH_CLASSES: Record<ZoneWidth, string> = {
   full: 'col-span-12',
 };
 
+const COMMON_EXTENSIONS = ['wav', 'mp3', 'flac', 'png', 'jpg', 'pdf', 'docx', 'xlsx', 'zip', 'exe', 'ts', 'py'];
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -238,6 +249,8 @@ export function SmartZonesView({
   currentPath,
   zones,
   isCustomFolderConfig = false,
+  layoutMode: propsLayoutMode = 'grid',
+  onLayoutModeChange,
   onUpdateZones,
   onResetFolderZones,
   onRefresh,
@@ -259,6 +272,175 @@ export function SmartZonesView({
   const [dragOverZoneId, setDragOverZoneId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [dragDropFeedback, setDragDropFeedback] = useState<string | null>(null);
+
+  // Layout mode & Freeform customization state
+  const [layoutMode, setLayoutMode] = useState<SmartZonesLayoutMode>(propsLayoutMode || 'grid');
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
+  const [draggingZoneId, setDraggingZoneId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [resizingZoneId, setResizingZoneId] = useState<string | null>(null);
+  const [resizeStart, setResizeStart] = useState<{
+    startX: number;
+    startY: number;
+    initialWidth: number;
+    initialHeight: number;
+  }>({ startX: 0, startY: 0, initialWidth: 380, initialHeight: 340 });
+
+  useEffect(() => {
+    if (propsLayoutMode) {
+      setLayoutMode(propsLayoutMode);
+    }
+  }, [propsLayoutMode]);
+
+  const getZoneLayout = (zone: SmartZone, index: number): ZoneFreeformLayout => {
+    if (zone.freeform) {
+      return zone.freeform;
+    }
+    const col = index % 3;
+    const row = Math.floor(index / 3);
+    return {
+      x: 20 + col * (380 + 20),
+      y: 20 + row * (340 + 20),
+      width: 380,
+      height: 340,
+    };
+  };
+
+  const handleZoneDragStart = (e: React.MouseEvent, zoneId: string) => {
+    if (!isEditMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const zone = zones.find((z) => z.id === zoneId);
+    if (!zone) return;
+    const index = zones.indexOf(zone);
+    const layout = getZoneLayout(zone, index);
+    setDraggingZoneId(zoneId);
+    setDragOffset({
+      x: e.clientX - layout.x,
+      y: e.clientY - layout.y,
+    });
+  };
+
+  const handleResizeStart = (e: React.MouseEvent, zoneId: string) => {
+    if (!isEditMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const zone = zones.find((z) => z.id === zoneId);
+    if (!zone) return;
+    const index = zones.indexOf(zone);
+    const layout = getZoneLayout(zone, index);
+    setResizingZoneId(zoneId);
+    setResizeStart({
+      startX: e.clientX,
+      startY: e.clientY,
+      initialWidth: layout.width,
+      initialHeight: layout.height,
+    });
+  };
+
+  const handleResetZoneSize = (e: React.MouseEvent, zoneId: string) => {
+    e.stopPropagation();
+    const updated = zones.map((z, i) => {
+      if (z.id === zoneId) {
+        const cur = getZoneLayout(z, i);
+        return {
+          ...z,
+          freeform: {
+            ...cur,
+            width: 380,
+            height: 340,
+          },
+        };
+      }
+      return z;
+    });
+    onUpdateZones(updated);
+  };
+
+  const handleAutoArrange = () => {
+    const updated = zones.map((z, i) => {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      return {
+        ...z,
+        freeform: {
+          x: 20 + col * (380 + 20),
+          y: 20 + row * (340 + 20),
+          width: 380,
+          height: 340,
+        },
+      };
+    });
+    onUpdateZones(updated);
+  };
+
+  // Window drag/resize listener for Freeform boxes
+  useEffect(() => {
+    if (!draggingZoneId && !resizingZoneId) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (draggingZoneId) {
+        let nextX = e.clientX - dragOffset.x;
+        let nextY = e.clientY - dragOffset.y;
+        if (snapToGrid) {
+          nextX = Math.round(nextX / 16) * 16;
+          nextY = Math.round(nextY / 16) * 16;
+        }
+        nextX = Math.max(12, nextX);
+        nextY = Math.max(12, nextY);
+
+        onUpdateZones(
+          zones.map((z, idx) => {
+            if (z.id === draggingZoneId) {
+              const cur = getZoneLayout(z, idx);
+              return {
+                ...z,
+                freeform: { ...cur, x: nextX, y: nextY },
+              };
+            }
+            return z;
+          })
+        );
+      } else if (resizingZoneId) {
+        const deltaX = e.clientX - resizeStart.startX;
+        const deltaY = e.clientY - resizeStart.startY;
+        let nextW = resizeStart.initialWidth + deltaX;
+        let nextH = resizeStart.initialHeight + deltaY;
+        if (snapToGrid) {
+          nextW = Math.round(nextW / 16) * 16;
+          nextH = Math.round(nextH / 16) * 16;
+        }
+        nextW = Math.max(260, nextW);
+        nextH = Math.max(180, nextH);
+
+        onUpdateZones(
+          zones.map((z, idx) => {
+            if (z.id === resizingZoneId) {
+              const cur = getZoneLayout(z, idx);
+              return {
+                ...z,
+                freeform: { ...cur, width: nextW, height: nextH },
+              };
+            }
+            return z;
+          })
+        );
+      }
+    };
+
+    const handleMouseUp = () => {
+      setDraggingZoneId(null);
+      setResizingZoneId(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingZoneId, resizingZoneId, dragOffset, resizeStart, snapToGrid, zones, onUpdateZones]);
 
   // Background context menu handler for empty spaces inside zones or container
   const handleBackgroundContextMenu = (e: React.MouseEvent, targetZoneId?: string) => {
@@ -356,7 +538,9 @@ export function SmartZonesView({
       target.closest('button') ||
       target.closest('input') ||
       target.closest('select') ||
-      target.closest('#modal-create-smart-zone')
+      target.closest('#modal-create-smart-zone') ||
+      target.closest('[data-resize-handle]') ||
+      (isEditMode && target.closest('[data-zone-header]'))
     ) {
       return;
     }
@@ -758,6 +942,673 @@ export function SmartZonesView({
     );
   }
 
+  const renderZoneBox = (zone: SmartZone, isFreeform: boolean) => {
+    const zoneItems = zoneFileMap.get(zone.id) || [];
+    const colorCfg = COLOR_STYLES[zone.color] || COLOR_STYLES.blue;
+    const totalBytes = zoneItems.reduce((acc, it) => acc + (it.size || 0), 0);
+    const isEditing = editingZoneId === zone.id;
+    const index = zones.indexOf(zone);
+    const layout = getZoneLayout(zone, index);
+    const isBeingDragged = draggingZoneId === zone.id;
+    const isBeingResized = resizingZoneId === zone.id;
+
+    return (
+      <div
+        key={zone.id}
+        id={`zone-box-${zone.id}`}
+        data-zone-box={zone.id}
+        onContextMenu={(e) => handleBackgroundContextMenu(e, zone.id)}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          if (dragOverZoneId !== zone.id) setDragOverZoneId(zone.id);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setDragOverZoneId(null);
+        }}
+        onDrop={(e) => handleDropOnZone(e, zone.id)}
+        style={
+          isFreeform
+            ? {
+                position: 'absolute',
+                left: `${layout.x}px`,
+                top: `${layout.y}px`,
+                width: `${layout.width}px`,
+                height: `${layout.height}px`,
+                zIndex: isBeingDragged ? 50 : isBeingResized ? 45 : 10,
+              }
+            : undefined
+        }
+        className={`flex flex-col bg-white rounded-xl border ${colorCfg.border} shadow-xs transition-all ${
+          isFreeform
+            ? `overflow-hidden ${
+                isBeingDragged
+                  ? 'ring-2 ring-blue-500 shadow-2xl opacity-95'
+                  : isBeingResized
+                  ? 'ring-2 ring-amber-500 shadow-xl'
+                  : isEditMode
+                  ? 'hover:ring-1 hover:ring-blue-400 border-dashed'
+                  : ''
+              }`
+            : `${WIDTH_CLASSES[zone.width] || WIDTH_CLASSES['col-1']} ${
+                dragOverZoneId === zone.id
+                  ? 'ring-2 ring-blue-500 bg-blue-50/20 border-blue-400 scale-[1.01]'
+                  : ''
+              }`
+        }`}
+      >
+        {/* Box Header */}
+        <div
+          data-zone-header={zone.id}
+          onMouseDown={(e) => {
+            if (isFreeform && isEditMode) {
+              handleZoneDragStart(e, zone.id);
+            }
+          }}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-t-xl border-b border-neutral-200/70 ${colorCfg.headerBg} transition-colors ${
+            isFreeform && isEditMode ? 'cursor-move select-none' : ''
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isFreeform && isEditMode && (
+              <GripHorizontal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+            )}
+            <span className={`w-2.5 h-2.5 rounded-full ${colorCfg.dot} shrink-0`} />
+            <span className="font-semibold text-xs truncate">{zone.name}</span>
+            {isFreeform && isEditMode && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                {layout.width}×{layout.height}px
+              </span>
+            )}
+            {(zone.rule.ruleType === 'extension' || (zone.rule.ruleType === 'category' && zone.rule.category === 'custom')) &&
+              zone.rule.extensions &&
+              zone.rule.extensions.length > 0 && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-black/5 text-neutral-700 font-mono shrink-0 max-w-[120px] truncate">
+                  .{zone.rule.extensions.slice(0, 3).join(', .')}
+                  {zone.rule.extensions.length > 3 ? ` +${zone.rule.extensions.length - 3}` : ''}
+                </span>
+              )}
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${colorCfg.badgeBg} ${colorCfg.badgeText} shrink-0`}
+            >
+              {zoneItems.length} mục {zoneItems.length > 0 && `• ${formatBytes(totalBytes)}`}
+            </span>
+          </div>
+
+          {/* Header Controls */}
+          <div className="flex items-center gap-1 shrink-0 ml-2">
+            {isFreeform && isEditMode && (
+              <button
+                onClick={(e) => handleResetZoneSize(e, zone.id)}
+                title="Đặt lại kích thước chuẩn (380×340)"
+                className="p-1 text-neutral-500 hover:text-neutral-900 rounded-md hover:bg-black/5 transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            <button
+              onClick={() => setEditingZoneId(isEditing ? null : zone.id)}
+              title="Cài đặt khu vực"
+              className="p-1 text-neutral-500 hover:text-neutral-900 rounded-md hover:bg-black/5 transition-colors"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={() => handleToggleCollapse(zone.id)}
+              title={zone.collapsed ? 'Mở rộng' : 'Thu gọn'}
+              className="p-1 text-neutral-500 hover:text-neutral-900 rounded-md hover:bg-black/5 transition-colors"
+            >
+              {zone.collapsed ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronUp className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Inline Quick Settings Drawer */}
+        {isEditing && (
+          <div className="p-3 bg-neutral-50/90 border-b border-neutral-200 text-xs space-y-3 animate-in fade-in overflow-y-auto max-h-[280px]">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-neutral-700">Tùy chỉnh hộp:</span>
+              <button
+                onClick={() => handleDeleteZone(zone.id)}
+                className="flex items-center gap-1 text-rose-600 hover:text-rose-700 text-[11px]"
+              >
+                <Trash2 className="w-3 h-3" />
+                Xóa hộp này
+              </button>
+            </div>
+
+            {/* Rename */}
+            <div>
+              <label className="text-[11px] text-neutral-500 block mb-1">Tên hộp:</label>
+              <input
+                type="text"
+                value={zone.name}
+                onChange={(e) => handleUpdateZone(zone.id, { name: e.target.value })}
+                className="w-full px-2.5 py-1 bg-white border border-neutral-300 rounded-md text-xs font-medium"
+              />
+            </div>
+
+            {/* Width or Freeform dimensions */}
+            {isFreeform ? (
+              <div>
+                <label className="text-[11px] text-neutral-500 block mb-1">Kích thước tự do (W × H):</label>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs px-2 py-1 bg-white border border-neutral-300 rounded-md text-neutral-700 font-semibold">
+                    {layout.width} × {layout.height} px
+                  </span>
+                  <button
+                    onClick={(e) => handleResetZoneSize(e, zone.id)}
+                    className="px-2 py-1 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 rounded text-[11px] transition-colors"
+                  >
+                    Chuẩn (380×340)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-[11px] text-neutral-500 block mb-1">Độ rộng khung lưới:</label>
+                <div className="grid grid-cols-4 gap-1">
+                  {(['col-1', 'col-2', 'col-3', 'col-full'] as ZoneWidth[]).map((w) => (
+                    <button
+                      key={w}
+                      onClick={() => handleUpdateZone(zone.id, { width: w })}
+                      className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                        zone.width === w
+                          ? 'bg-blue-50 border-blue-500 text-blue-700'
+                          : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                      }`}
+                    >
+                      {w === 'col-1' ? 'Hẹp (1 cột)' : w === 'col-2' ? 'Vừa (2 cột)' : w === 'col-3' ? 'Rộng (3 cột)' : 'Toàn màn hình'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Color */}
+            <div>
+              <label className="text-[11px] text-neutral-500 block mb-1">Màu nhận diện:</label>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(Object.keys(COLOR_STYLES) as ZoneColor[]).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => handleUpdateZone(zone.id, { color: c })}
+                    className={`w-6 h-6 rounded-full border-2 transition-all ${
+                      COLOR_STYLES[c].dot
+                    } ${zone.color === c ? 'scale-110 ring-2 ring-offset-1 ring-blue-500 border-white' : 'border-transparent opacity-80 hover:opacity-100'}`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Display style */}
+            <div>
+              <label className="text-[11px] text-neutral-500 block mb-1">Kiểu hiển thị tệp:</label>
+              <div className="grid grid-cols-3 gap-1">
+                {(['icons', 'compact', 'details'] as ZoneDisplayStyle[]).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => handleUpdateZone(zone.id, { displayStyle: st })}
+                    className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                      zone.displayStyle === st
+                        ? 'bg-blue-50 border-blue-500 text-blue-700'
+                        : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                    }`}
+                  >
+                    {st === 'icons' ? 'Biểu tượng lớn' : st === 'compact' ? 'Danh sách gọn' : 'Chi tiết'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Rule Configuration */}
+            <div className="pt-1 border-t border-neutral-200/80 space-y-2">
+              <div>
+                <label className="text-[11px] text-neutral-500 block mb-1">Quy tắc tự gom file:</label>
+                <select
+                  value={zone.rule.ruleType}
+                  onChange={(e) => {
+                    const newType = e.target.value as ZoneRuleType;
+                    const existingExts = zone.rule.extensions && zone.rule.extensions.length > 0 ? zone.rule.extensions : ['wav'];
+                    handleUpdateZone(zone.id, {
+                      rule: {
+                        ruleType: newType,
+                        recentHours: newType === 'recent' ? 24 : undefined,
+                        category: newType === 'category' ? 'archives' : undefined,
+                        extensions: newType === 'extension' ? existingExts : undefined,
+                        customExtensionsInput: newType === 'extension' ? (zone.rule.customExtensionsInput || existingExts.join(', ')) : undefined,
+                        manualItemPaths: newType === 'manual' ? [] : undefined,
+                      },
+                    });
+                  }}
+                  className="w-full px-2 py-1 bg-white border border-neutral-300 rounded-md text-xs font-medium"
+                >
+                  <option value="extension">🎯 Theo đuôi tệp cụ thể (.wav, .mp3, .psd...)</option>
+                  <option value="category">📦 Nhóm định dạng (Nén, Tài liệu, Media...)</option>
+                  <option value="recent">⚡ Mới tải về / Cập nhật gần đây</option>
+                  <option value="keyword">🏷️ Theo từ khóa tên file</option>
+                  <option value="size">⚖️ Dung lượng lớn (&gt;50MB)</option>
+                  <option value="manual">✋ Kéo thả phân bộ thủ công</option>
+                </select>
+              </div>
+
+              {(zone.rule.ruleType === 'extension' || (zone.rule.ruleType === 'category' && zone.rule.category === 'custom')) && (
+                <div className="p-2 bg-white rounded-lg border border-neutral-200 space-y-1.5">
+                  <label className="text-[11px] font-medium text-neutral-700 block">
+                    Đuôi tệp cần gom (phân cách bằng dấu phẩy):
+                  </label>
+                  <input
+                    type="text"
+                    value={zone.rule.customExtensionsInput ?? (zone.rule.extensions || []).join(', ')}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const parsed = parseExtensionsInput(raw);
+                      handleUpdateZone(zone.id, {
+                        rule: {
+                          ...zone.rule,
+                          customExtensionsInput: raw,
+                          extensions: parsed,
+                        },
+                      });
+                    }}
+                    placeholder="ví dụ: wav, mp3, flac, aac"
+                    className="w-full px-2.5 py-1.5 bg-neutral-50 border border-neutral-300 rounded-md text-xs font-mono font-medium focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                  />
+                  <div className="pt-1">
+                    <span className="text-[10px] text-neutral-400 block mb-1">Gợi ý nhanh (nhấn để bật/tắt):</span>
+                    <div className="flex flex-wrap gap-1">
+                      {COMMON_EXTENSIONS.map((ext) => {
+                        const isCurrentActive = (zone.rule.extensions || []).includes(ext);
+                        return (
+                          <button
+                            key={ext}
+                            type="button"
+                            onClick={() => {
+                              const nextInput = toggleExtensionInInput(
+                                zone.rule.customExtensionsInput ?? (zone.rule.extensions || []).join(', '),
+                                ext
+                              );
+                              const parsed = parseExtensionsInput(nextInput);
+                              handleUpdateZone(zone.id, {
+                                rule: {
+                                  ...zone.rule,
+                                  customExtensionsInput: nextInput,
+                                  extensions: parsed,
+                                },
+                              });
+                            }}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors border ${
+                              isCurrentActive
+                                ? 'bg-blue-600 text-white border-blue-600 font-bold'
+                                : 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200'
+                            }`}
+                          >
+                            .{ext}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Zone Content / File Items */}
+        {!zone.collapsed && (
+          <div
+            onContextMenu={(e) => handleBackgroundContextMenu(e, zone.id)}
+            className={`p-2 overflow-y-auto ${isFreeform ? 'flex-1 min-h-0' : 'min-h-[120px] max-h-[420px]'}`}
+          >
+            {zoneItems.length === 0 ? (
+              <div className="h-28 flex flex-col items-center justify-center text-neutral-400 text-center p-3 border-2 border-dashed border-neutral-100 rounded-lg">
+                <Sparkles className="w-5 h-5 mb-1 text-neutral-300 stroke-[1.5]" />
+                <span className="text-[11px]">Chưa có file nào khớp với hộp này</span>
+                <span className="text-[10px] text-neutral-400 mt-0.5">
+                  {(zone.rule.ruleType === 'extension' || (zone.rule.ruleType === 'category' && zone.rule.category === 'custom')) &&
+                  zone.rule.extensions &&
+                  zone.rule.extensions.length > 0
+                    ? `Hộp đang gom các tệp đuôi: .${zone.rule.extensions.join(', .')}`
+                    : 'Kéo file thả vào đây hoặc đợi file mới xuất hiện'}
+                </span>
+              </div>
+            ) : (
+              <div
+                className={
+                  zone.displayStyle === 'icons'
+                    ? 'grid grid-cols-3 sm:grid-cols-4 gap-2'
+                    : zone.displayStyle === 'cards'
+                    ? 'grid grid-cols-1 sm:grid-cols-2 gap-2'
+                    : 'space-y-1'
+                }
+              >
+                {zoneItems.map((item) => {
+                  const isSelected = selectedItems.some((s) => s.id === item.id);
+                  const isCut = clipboard?.action === 'cut' && clipboard.items.some((i) => i.id === item.id);
+                  const isFolderDragOver = item.isDir && dragOverFolderId === item.id;
+
+                  if (zone.displayStyle === 'icons') {
+                    return (
+                      <div
+                        key={item.id}
+                        data-item-id={item.id}
+                        draggable
+                        onDragStart={(e) => handleItemDragStart(e, item, zone.id)}
+                        onDragEnd={handleItemDragEnd}
+                        onDragOver={(e) => {
+                          if (item.isDir) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'move';
+                            if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
+                          }
+                        }}
+                        onDragLeave={(e) => {
+                          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                          if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
+                        }}
+                        onDrop={(e) => {
+                          if (item.isDir) handleDropOnFolder(e, item);
+                        }}
+                        onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
+                        onDoubleClick={() => onOpenItem(item)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onContextMenu(e, item, zone.id);
+                        }}
+                        className={`flex flex-col items-center text-center p-2 rounded-lg cursor-pointer border transition-all relative ${
+                          isCut ? 'opacity-50' : ''
+                        } ${
+                          isFolderDragOver
+                            ? 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 text-blue-900 shadow-md font-semibold'
+                            : isSelected
+                            ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300'
+                            : 'bg-white hover:bg-neutral-50/80 border-transparent hover:border-neutral-200'
+                        }`}
+                      >
+                        <div className="w-10 h-10 flex items-center justify-center mb-1">
+                          {getFileIcon(item)}
+                        </div>
+                        <span className="text-xs font-medium text-neutral-800 line-clamp-2 break-all max-w-[110px]">
+                          {item.name}
+                        </span>
+                        {isFolderDragOver && (
+                          <span className="text-[9px] text-blue-700 bg-white/90 px-1 py-0.2 rounded border border-blue-300 mt-1 font-medium">
+                            Thả vào
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  if (zone.displayStyle === 'cards') {
+                    return (
+                      <div
+                        key={item.id}
+                        data-item-id={item.id}
+                        draggable
+                        onDragStart={(e) => handleItemDragStart(e, item, zone.id)}
+                        onDragEnd={handleItemDragEnd}
+                        onDragOver={(e) => {
+                          if (item.isDir) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'move';
+                            if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
+                          }
+                        }}
+                        onDragLeave={(e) => {
+                          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                          if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
+                        }}
+                        onDrop={(e) => {
+                          if (item.isDir) handleDropOnFolder(e, item);
+                        }}
+                        onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
+                        onDoubleClick={() => onOpenItem(item)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onContextMenu(e, item, zone.id);
+                        }}
+                        className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all relative ${
+                          isCut ? 'opacity-50' : ''
+                        } ${
+                          isFolderDragOver
+                            ? 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 shadow-md'
+                            : isSelected
+                            ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300'
+                            : 'bg-neutral-50/50 hover:bg-neutral-100/70 border-neutral-200/60'
+                        }`}
+                      >
+                        <div className="w-7 h-7 rounded-md bg-white border border-neutral-200/60 flex items-center justify-center shrink-0">
+                          {getFileIcon(item)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium text-neutral-800 truncate">{item.name}</div>
+                          <div className="text-[10px] text-neutral-400 flex items-center gap-2">
+                            <span>{item.isDir ? 'Folder' : formatBytes(item.size)}</span>
+                            {isFolderDragOver && (
+                              <span className="text-[9px] text-blue-700 bg-white/90 px-1 py-0.2 rounded border border-blue-300 font-medium">
+                                Thả vào thư mục
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // compact & details
+                  return (
+                    <div
+                      key={item.id}
+                      data-item-id={item.id}
+                      draggable
+                      onDragStart={(e) => handleItemDragStart(e, item, zone.id)}
+                      onDragEnd={handleItemDragEnd}
+                      onDragOver={(e) => {
+                        if (item.isDir) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                        if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
+                      }}
+                      onDrop={(e) => {
+                        if (item.isDir) handleDropOnFolder(e, item);
+                      }}
+                      onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
+                      onDoubleClick={() => onOpenItem(item)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onContextMenu(e, item, zone.id);
+                      }}
+                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs cursor-pointer select-none transition-all ${
+                        isCut ? 'opacity-50' : ''
+                      } ${
+                        isFolderDragOver
+                          ? 'bg-blue-100 text-blue-900 border-2 border-blue-500 font-semibold shadow-xs'
+                          : isSelected
+                          ? 'bg-blue-50 text-blue-900 border border-blue-300'
+                          : 'hover:bg-neutral-100/80 text-neutral-800 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                        {getFileIcon(item)}
+                        <span className="truncate text-[11px] font-medium">{item.name}</span>
+                        {isFolderDragOver && (
+                          <span className="text-[10px] text-blue-700 bg-white/80 px-1 py-0.2 rounded border border-blue-300">
+                            Thả vào thư mục
+                          </span>
+                        )}
+                      </div>
+
+                      {zone.displayStyle === 'details' && (
+                        <div className="flex items-center gap-3 shrink-0 text-[10px] text-neutral-500">
+                          <span>{item.isDir ? 'Folder' : formatBytes(item.size)}</span>
+                          <span>{new Date(item.modifiedMs).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Resize handle in Freeform edit mode */}
+        {isFreeform && isEditMode && (
+          <div
+            data-resize-handle={zone.id}
+            onMouseDown={(e) => handleResizeStart(e, zone.id)}
+            title="Kéo góc này để thay đổi kích thước hộp"
+            className="absolute bottom-1 right-1 w-6 h-6 cursor-se-resize flex items-center justify-center text-neutral-500 hover:text-blue-600 bg-white/90 hover:bg-blue-50 border border-neutral-300 rounded shadow-xs transition-all z-30"
+          >
+            <Maximize2 className="w-3.5 h-3.5 rotate-90" />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderUnsortedBox = (isFreeform: boolean) => {
+    if (unsortedItems.length === 0) return null;
+
+    return (
+      <div
+        id="zone-box-unsorted"
+        onContextMenu={(e) => handleBackgroundContextMenu(e)}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          if (dragOverZoneId !== 'unsorted') setDragOverZoneId('unsorted');
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setDragOverZoneId(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOverZoneId(null);
+          if (draggedSourceZoneId && draggedSourceZoneId !== 'unsorted') {
+            const list = draggedItems.length > 0 ? draggedItems : items.filter((i) => i.path === draggedItemPath);
+            const paths = list.map((i) => i.path);
+            const updatedZones = zones.map((z) => {
+              if (z.id === draggedSourceZoneId) {
+                return {
+                  ...z,
+                  rule: {
+                    ...z.rule,
+                    manualItemPaths: (z.rule.manualItemPaths || []).filter((p) => !paths.includes(p)),
+                  },
+                };
+              }
+              return z;
+            });
+            onUpdateZones(updatedZones);
+            setDragDropFeedback(`Đã chuyển ${list.length} tệp ra khỏi hộp`);
+            setTimeout(() => setDragDropFeedback(null), 3000);
+          }
+          setDraggedItems([]);
+          setDraggedItemPath(null);
+          setDraggedSourceZoneId(null);
+        }}
+        className={`${isFreeform ? 'w-full' : 'col-span-12'} flex flex-col bg-white rounded-xl border border-dashed shadow-xs transition-all ${
+          dragOverZoneId === 'unsorted'
+            ? 'border-blue-500 bg-blue-50/20 ring-2 ring-blue-500'
+            : 'border-neutral-300'
+        }`}
+      >
+        <div className="flex items-center justify-between px-3.5 py-2.5 bg-neutral-100/60 rounded-t-xl border-b border-neutral-200">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-neutral-400 shrink-0" />
+            <span className="font-semibold text-xs text-neutral-700">Các file khác trong thư mục (Chưa vào hộp nào)</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-200 text-neutral-700 font-medium">
+              {unsortedItems.length} mục
+            </span>
+          </div>
+          <span className="text-[11px] text-neutral-400">
+            Kéo thả file vào bất kỳ hộp phía trên để phân loại
+          </span>
+        </div>
+
+        <div
+          onContextMenu={(e) => handleBackgroundContextMenu(e)}
+          className="p-2.5 max-h-[300px] overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2"
+        >
+          {unsortedItems.map((item) => {
+            const isSelected = selectedItems.some((s) => s.id === item.id);
+            const isCut = clipboard?.action === 'cut' && clipboard.items.some((i) => i.id === item.id);
+            const isFolderDragOver = item.isDir && dragOverFolderId === item.id;
+
+            return (
+              <div
+                key={item.id}
+                data-item-id={item.id}
+                draggable
+                onDragStart={(e) => handleItemDragStart(e, item, 'unsorted')}
+                onDragEnd={handleItemDragEnd}
+                onDragOver={(e) => {
+                  if (item.isDir) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                  if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
+                }}
+                onDrop={(e) => {
+                  if (item.isDir) handleDropOnFolder(e, item);
+                }}
+                onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
+                onDoubleClick={() => onOpenItem(item)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onContextMenu(e, item);
+                }}
+                className={`flex items-center gap-2 p-1.5 rounded-lg border cursor-pointer text-xs transition-all relative ${
+                  isCut ? 'opacity-50' : ''
+                } ${
+                  isFolderDragOver
+                    ? 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 text-blue-900 shadow-sm font-semibold'
+                    : isSelected
+                    ? 'bg-blue-50 border-blue-300 text-blue-900 ring-1 ring-blue-300'
+                    : 'bg-white hover:bg-neutral-50 border-neutral-200 text-neutral-700'
+                }`}
+              >
+                {getFileIcon(item)}
+                <span className="truncate text-[11px]">{item.name}</span>
+                {isFolderDragOver && (
+                  <span className="text-[9px] text-blue-700 bg-white/90 px-1 py-0.2 rounded border border-blue-300 ml-auto shrink-0 font-medium">
+                    Thả vào
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       ref={containerRef}
@@ -767,7 +1618,7 @@ export function SmartZonesView({
       className="flex-1 flex flex-col h-full bg-neutral-50/60 overflow-y-auto p-4 space-y-4 select-none relative"
     >
       {/* 1. Header Toolbar */}
-      <div className="flex items-center justify-between gap-3 bg-white px-3.5 py-2.5 rounded-xl border border-neutral-200/80 shadow-xs">
+      <div className="flex items-center justify-between gap-3 bg-white px-3.5 py-2.5 rounded-xl border border-neutral-200/80 shadow-xs flex-wrap">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
             <Layers className="w-4 h-4" />
@@ -785,7 +1636,94 @@ export function SmartZonesView({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* Mode Switcher: Lưới Ngăn Nắp (Grid) vs Bố Cục Tự Do (Freeform) */}
+          <div className="flex items-center bg-neutral-100 p-0.5 rounded-lg border border-neutral-200/80">
+            <button
+              id="btn-zones-mode-grid"
+              onClick={() => {
+                setLayoutMode('grid');
+                setIsEditMode(false);
+                onLayoutModeChange?.('grid');
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                layoutMode === 'grid'
+                  ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+              title="Lưới Ngăn Nắp: Tự động sắp xếp các hộp theo hàng và cột ngay ngắn"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
+              <span>Lưới Ngăn Nắp</span>
+            </button>
+
+            <button
+              id="btn-zones-mode-freeform"
+              onClick={() => {
+                setLayoutMode('freeform');
+                onLayoutModeChange?.('freeform');
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                layoutMode === 'freeform'
+                  ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-800'
+              }`}
+              title="Bố Cục Tự Do: Tùy chỉnh vị trí và kích thước từng hộp theo ý muốn"
+            >
+              <Move className="w-3.5 h-3.5 text-amber-600" />
+              <span>Bố Cục Tự Do</span>
+            </button>
+          </div>
+
+          {/* Controls specific to Freeform Mode */}
+          {layoutMode === 'freeform' && (
+            <div className="flex items-center gap-1.5">
+              <button
+                id="btn-toggle-edit-mode"
+                onClick={() => setIsEditMode(!isEditMode)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all shadow-xs ${
+                  isEditMode
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400 font-semibold'
+                    : 'bg-white hover:bg-neutral-100 text-neutral-700 border border-neutral-300'
+                }`}
+                title={
+                  isEditMode
+                    ? 'Khóa vị trí và lưu bố cục tự do'
+                    : 'Bật chế độ chỉnh sửa để di chuyển và thay đổi kích thước hộp'
+                }
+              >
+                {isEditMode ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                <span>{isEditMode ? 'Khóa & Hoàn Tất' : 'Chỉnh Sửa Bố Cục'}</span>
+              </button>
+
+              {isEditMode && (
+                <>
+                  <button
+                    onClick={() => setSnapToGrid(!snapToGrid)}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      snapToGrid
+                        ? 'bg-blue-50 border-blue-300 text-blue-700'
+                        : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                    }`}
+                    title="Bám lưới 16px để căn chỉnh các hộp đều nhau"
+                  >
+                    <Grid className="w-3.5 h-3.5" />
+                    <span>Bám lưới</span>
+                  </button>
+
+                  <button
+                    onClick={handleAutoArrange}
+                    className="flex items-center gap-1 px-2 py-1.5 bg-white hover:bg-neutral-50 border border-neutral-200 rounded-lg text-xs font-medium text-neutral-600 transition-colors"
+                    title="Tự động sắp xếp lại các hộp thẳng hàng trên canvas"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Tự Căn Chỉnh</span>
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Reset per-folder configuration if modified */}
           {isCustomFolderConfig && onResetFolderZones && (
             <button
@@ -810,6 +1748,23 @@ export function SmartZonesView({
         </div>
       </div>
 
+      {/* Freeform Edit Mode Banner */}
+      {layoutMode === 'freeform' && isEditMode && (
+        <div className="px-3.5 py-2.5 bg-amber-50/90 border border-amber-300 text-amber-900 text-xs rounded-xl flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+            <span className="font-semibold">Đang trong Chế độ Chỉnh sửa Bố Cục Tự Do:</span>
+            <span>Kéo thanh tiêu đề hộp để di chuyển vị trí. Kéo góc dưới bên phải (◢) để thay đổi kích thước hộp theo ý muốn.</span>
+          </div>
+          <button
+            onClick={() => setIsEditMode(false)}
+            className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow-xs"
+          >
+            Khóa & Xong
+          </button>
+        </div>
+      )}
+
       {/* Drag & Drop Feedback Toast */}
       {dragDropFeedback && (
         <div className="px-3 py-2 bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg flex items-center justify-between shadow-xs animate-in fade-in">
@@ -823,608 +1778,30 @@ export function SmartZonesView({
         </div>
       )}
 
-      {/* 2. Grid of Zone Boxes */}
-      <div className="grid grid-cols-12 gap-4" onContextMenu={(e) => handleBackgroundContextMenu(e)}>
-        {zones.map((zone) => {
-          const zoneItems = zoneFileMap.get(zone.id) || [];
-          const colorCfg = COLOR_STYLES[zone.color] || COLOR_STYLES.blue;
-          const totalBytes = zoneItems.reduce((acc, it) => acc + (it.size || 0), 0);
-          const isEditing = editingZoneId === zone.id;
-
-          return (
-            <div
-              key={zone.id}
-              id={`zone-box-${zone.id}`}
-              onContextMenu={(e) => handleBackgroundContextMenu(e, zone.id)}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'copy';
-                if (dragOverZoneId !== zone.id) setDragOverZoneId(zone.id);
-              }}
-              onDragLeave={(e) => {
-                if (e.currentTarget === e.target) setDragOverZoneId(null);
-              }}
-              onDrop={(e) => handleDropOnZone(e, zone.id)}
-              className={`flex flex-col bg-white rounded-xl border ${colorCfg.border} shadow-xs transition-all ${
-                WIDTH_CLASSES[zone.width] || WIDTH_CLASSES['col-1']
-              } ${dragOverZoneId === zone.id ? 'ring-2 ring-blue-500 bg-blue-50/20 border-blue-400 scale-[1.01]' : ''}`}
-            >
-              {/* Box Header */}
-              <div
-                className={`flex items-center justify-between px-3.5 py-2.5 rounded-t-xl border-b border-neutral-200/70 ${colorCfg.headerBg} transition-colors`}
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className={`w-2.5 h-2.5 rounded-full ${colorCfg.dot} shrink-0`} />
-                  <span className="font-semibold text-xs truncate">{zone.name}</span>
-                  {(zone.rule.ruleType === 'extension' || (zone.rule.ruleType === 'category' && zone.rule.category === 'custom')) &&
-                    zone.rule.extensions &&
-                    zone.rule.extensions.length > 0 && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-black/5 text-neutral-700 font-mono shrink-0 max-w-[120px] truncate">
-                        .{zone.rule.extensions.slice(0, 3).join(', .')}
-                        {zone.rule.extensions.length > 3 ? ` +${zone.rule.extensions.length - 3}` : ''}
-                      </span>
-                    )}
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${colorCfg.badgeBg} ${colorCfg.badgeText} shrink-0`}
-                  >
-                    {zoneItems.length} mục {zoneItems.length > 0 && `• ${formatBytes(totalBytes)}`}
-                  </span>
-                </div>
-
-                {/* Header Controls */}
-                <div className="flex items-center gap-1 shrink-0 ml-2">
-                  <button
-                    onClick={() => setEditingZoneId(isEditing ? null : zone.id)}
-                    title="Cài đặt khu vực"
-                    className="p-1 text-neutral-500 hover:text-neutral-900 rounded-md hover:bg-black/5 transition-colors"
-                  >
-                    <Settings2 className="w-3.5 h-3.5" />
-                  </button>
-
-                  <button
-                    onClick={() => handleToggleCollapse(zone.id)}
-                    title={zone.collapsed ? 'Mở rộng' : 'Thu gọn'}
-                    className="p-1 text-neutral-500 hover:text-neutral-900 rounded-md hover:bg-black/5 transition-colors"
-                  >
-                    {zone.collapsed ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronUp className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Inline Quick Settings Drawer */}
-              {isEditing && (
-                <div className="p-3 bg-neutral-50/90 border-b border-neutral-200 text-xs space-y-3 animate-in fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-neutral-700">Tùy chỉnh hộp:</span>
-                    <button
-                      onClick={() => handleDeleteZone(zone.id)}
-                      className="flex items-center gap-1 text-rose-600 hover:text-rose-700 text-[11px]"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      Xóa hộp này
-                    </button>
-                  </div>
-
-                  {/* Rename */}
-                  <div>
-                    <label className="text-[11px] text-neutral-500 block mb-1">Tên hộp:</label>
-                    <input
-                      type="text"
-                      value={zone.name}
-                      onChange={(e) => handleUpdateZone(zone.id, { name: e.target.value })}
-                      className="w-full px-2.5 py-1 text-xs bg-white border border-neutral-300 rounded-md focus:outline-blue-500"
-                    />
-                  </div>
-
-                  {/* Width & Display Style */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] text-neutral-500 block mb-1">Độ rộng hộp:</label>
-                      <select
-                        value={zone.width}
-                        onChange={(e) => handleUpdateZone(zone.id, { width: e.target.value as ZoneWidth })}
-                        className="w-full px-2 py-1 bg-white border border-neutral-300 rounded-md text-xs"
-                      >
-                        <option value="col-1">1 Cột (Nhỏ)</option>
-                        <option value="col-2">2 Cột (Vừa)</option>
-                        <option value="col-3">3 Cột (Lớn)</option>
-                        <option value="full">Toàn hàng (Full)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] text-neutral-500 block mb-1">Kiểu hiển thị file:</label>
-                      <select
-                        value={zone.displayStyle}
-                        onChange={(e) =>
-                          handleUpdateZone(zone.id, { displayStyle: e.target.value as ZoneDisplayStyle })
-                        }
-                        className="w-full px-2 py-1 bg-white border border-neutral-300 rounded-md text-xs"
-                      >
-                        <option value="compact">Danh sách gọn</option>
-                        <option value="icons">Lưới biểu tượng</option>
-                        <option value="details">Chi tiết đầy đủ</option>
-                        <option value="cards">Thẻ xem trước</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Colors */}
-                  <div>
-                    <label className="text-[11px] text-neutral-500 block mb-1.5">Màu sắc viền & header:</label>
-                    <div className="flex items-center gap-1.5">
-                      {(['blue', 'purple', 'emerald', 'amber', 'rose', 'cyan', 'indigo', 'slate'] as ZoneColor[]).map(
-                        (col) => (
-                          <button
-                            key={col}
-                            onClick={() => handleUpdateZone(zone.id, { color: col })}
-                            className={`w-5 h-5 rounded-full ${COLOR_STYLES[col].dot} flex items-center justify-center transition-transform ${
-                              zone.color === col ? 'ring-2 ring-offset-1 ring-neutral-900 scale-110' : 'opacity-70 hover:opacity-100'
-                            }`}
-                          >
-                            {zone.color === col && <Check className="w-3 h-3 text-white" />}
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Rule switcher */}
-                  <div className="pt-2 border-t border-neutral-200/70 space-y-2">
-                    <div>
-                      <label className="text-[11px] text-neutral-500 block mb-1">Quy tắc tự gom file:</label>
-                      <select
-                        value={zone.rule.ruleType}
-                        onChange={(e) => {
-                          const newType = e.target.value as ZoneRuleType;
-                          const existingExts = zone.rule.extensions && zone.rule.extensions.length > 0 ? zone.rule.extensions : ['wav'];
-                          handleUpdateZone(zone.id, {
-                            rule: {
-                              ruleType: newType,
-                              recentHours: newType === 'recent' ? 24 : undefined,
-                              category: newType === 'category' ? 'archives' : undefined,
-                              extensions: newType === 'extension' ? existingExts : undefined,
-                              customExtensionsInput: newType === 'extension' ? (zone.rule.customExtensionsInput || existingExts.join(', ')) : undefined,
-                              manualItemPaths: newType === 'manual' ? [] : undefined,
-                            },
-                          });
-                        }}
-                        className="w-full px-2 py-1 bg-white border border-neutral-300 rounded-md text-xs font-medium"
-                      >
-                        <option value="extension">🎯 Theo đuôi tệp cụ thể (.wav, .mp3, .psd...)</option>
-                        <option value="category">📦 Nhóm định dạng (Nén, Tài liệu, Media...)</option>
-                        <option value="recent">⚡ Mới tải về / Cập nhật gần đây</option>
-                        <option value="keyword">🏷️ Theo từ khóa tên file</option>
-                        <option value="size">⚖️ Dung lượng lớn (&gt;50MB)</option>
-                        <option value="manual">✋ Kéo thả phân bộ thủ công</option>
-                      </select>
-                    </div>
-
-                    {/* If extension or custom category rule: show extension input & quick chips */}
-                    {(zone.rule.ruleType === 'extension' || (zone.rule.ruleType === 'category' && zone.rule.category === 'custom')) && (
-                      <div className="p-2 bg-white rounded-lg border border-neutral-200 space-y-1.5">
-                        <label className="text-[11px] font-medium text-neutral-700 block">
-                          Đuôi tệp cần gom (phân cách bằng dấu phẩy):
-                        </label>
-                        <input
-                          type="text"
-                          value={zone.rule.customExtensionsInput ?? (zone.rule.extensions || []).join(', ')}
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            const parsed = parseExtensionsInput(raw);
-                            handleUpdateZone(zone.id, {
-                              rule: {
-                                ...zone.rule,
-                                extensions: parsed,
-                                customExtensionsInput: raw,
-                              },
-                            });
-                          }}
-                          placeholder="VD: wav hoặc .wav, .mp3, .flac, .psd..."
-                          className="w-full px-2.5 py-1 text-xs bg-neutral-50 border border-neutral-300 rounded-md font-mono focus:outline-blue-500 focus:bg-white"
-                        />
-                        <div className="flex flex-wrap gap-1 pt-1">
-                          {['wav', 'mp3', 'flac', 'png', 'jpg', 'pdf', 'docx', 'xlsx', 'zip', 'exe', 'ts', 'py'].map((ext) => {
-                            const isSelected = (zone.rule.extensions || []).includes(ext);
-                            return (
-                              <button
-                                key={ext}
-                                type="button"
-                                onClick={() => {
-                                  const currentStr = zone.rule.customExtensionsInput ?? (zone.rule.extensions || []).join(', ');
-                                  const updatedStr = toggleExtensionInInput(currentStr, ext);
-                                  handleUpdateZone(zone.id, {
-                                    rule: {
-                                      ...zone.rule,
-                                      extensions: parseExtensionsInput(updatedStr),
-                                      customExtensionsInput: updatedStr,
-                                    },
-                                  });
-                                }}
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors border ${
-                                  isSelected
-                                    ? 'bg-blue-600 text-white border-blue-600 font-semibold'
-                                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200 border-neutral-200'
-                                }`}
-                              >
-                                .{ext}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* If category rule: show category select */}
-                    {zone.rule.ruleType === 'category' && (
-                      <div className="flex items-center gap-2">
-                        <label className="text-[11px] text-neutral-500 shrink-0">Loại:</label>
-                        <select
-                          value={zone.rule.category || 'archives'}
-                          onChange={(e) => {
-                            const cat = e.target.value as any;
-                            handleUpdateZone(zone.id, {
-                              rule: {
-                                ...zone.rule,
-                                category: cat,
-                                extensions: cat === 'custom' ? (zone.rule.extensions && zone.rule.extensions.length > 0 ? zone.rule.extensions : ['wav']) : zone.rule.extensions,
-                                customExtensionsInput: cat === 'custom' ? (zone.rule.customExtensionsInput || 'wav') : zone.rule.customExtensionsInput,
-                              },
-                            });
-                          }}
-                          className="w-full px-2 py-1 bg-white border border-neutral-300 rounded-md text-xs"
-                        >
-                          <option value="archives">File Nén & Cài Đặt (.zip, .rar, .7z, .exe...)</option>
-                          <option value="documents">Tài Liệu Văn Phòng (.pdf, .docx, .txt, .xlsx...)</option>
-                          <option value="images">Hình Ảnh (.png, .jpg, .webp, .svg...)</option>
-                          <option value="media">Âm Thanh & Video (.mp4, .mp3, .mkv...)</option>
-                          <option value="folders">Thư Mục Con (Subfolders)</option>
-                          <option value="code">Mã Nguồn & Dự Án (.ts, .js, .py, .json...)</option>
-                          <option value="custom">🎯 Tùy chọn đuôi tệp riêng (.wav, .psd, .flac...)</option>
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Box Body / File Container */}
-              {!zone.collapsed && (
-                <div
-                  onContextMenu={(e) => handleBackgroundContextMenu(e, zone.id)}
-                  className="p-2 min-h-[120px] max-h-[420px] overflow-y-auto"
-                >
-                  {zoneItems.length === 0 ? (
-                    <div className="h-28 flex flex-col items-center justify-center text-neutral-400 text-center p-3 border-2 border-dashed border-neutral-100 rounded-lg">
-                      <Sparkles className="w-5 h-5 mb-1 text-neutral-300 stroke-[1.5]" />
-                      <span className="text-[11px]">Chưa có file nào khớp với hộp này</span>
-                      <span className="text-[10px] text-neutral-400 mt-0.5">
-                        {(zone.rule.ruleType === 'extension' || (zone.rule.ruleType === 'category' && zone.rule.category === 'custom')) &&
-                        zone.rule.extensions &&
-                        zone.rule.extensions.length > 0
-                          ? `Hộp đang gom các tệp đuôi: .${zone.rule.extensions.join(', .')}`
-                          : 'Kéo file thả vào đây hoặc đợi file mới xuất hiện'}
-                      </span>
-                    </div>
-                  ) : (
-                    <div
-                      className={
-                        zone.displayStyle === 'icons'
-                          ? 'grid grid-cols-3 sm:grid-cols-4 gap-2'
-                          : zone.displayStyle === 'cards'
-                          ? 'grid grid-cols-1 sm:grid-cols-2 gap-2'
-                          : 'space-y-1'
-                      }
-                    >
-                      {zoneItems.map((item) => {
-                        const isSelected = selectedItems.some((s) => s.id === item.id);
-                        const isCut = clipboard?.action === 'cut' && clipboard.items.some((i) => i.id === item.id);
-                        const isFolderDragOver = item.isDir && dragOverFolderId === item.id;
-
-                        if (zone.displayStyle === 'icons') {
-                          return (
-                            <div
-                              key={item.id}
-                              data-item-id={item.id}
-                              draggable
-                              onDragStart={(e) => handleItemDragStart(e, item, zone.id)}
-                              onDragEnd={handleItemDragEnd}
-                              onDragOver={(e) => {
-                                if (item.isDir) {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  e.dataTransfer.dropEffect = 'move';
-                                  if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
-                                }
-                              }}
-                              onDragLeave={(e) => {
-                                if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                                if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
-                              }}
-                              onDrop={(e) => {
-                                if (item.isDir) handleDropOnFolder(e, item);
-                              }}
-                              onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
-                              onDoubleClick={() => onOpenItem(item)}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onContextMenu(e, item, zone.id);
-                              }}
-                              className={`flex flex-col items-center text-center p-2 rounded-lg cursor-pointer border transition-all relative ${
-                                isCut ? 'opacity-50' : ''
-                              } ${
-                                isFolderDragOver
-                                  ? 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 shadow-md'
-                                  : isSelected
-                                  ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300'
-                                  : 'hover:bg-neutral-50 border-transparent'
-                              }`}
-                            >
-                              <div className="w-8 h-8 flex items-center justify-center mb-1">
-                                {getFileIcon(item)}
-                              </div>
-                              <span className="text-[11px] text-neutral-800 line-clamp-2 w-full break-all leading-tight">
-                                {item.name}
-                              </span>
-                              {isFolderDragOver && (
-                                <span className="absolute -top-2 bg-blue-600 text-white text-[9px] px-1.5 py-0.2 rounded-full font-medium shadow-xs">
-                                  Thả vào
-                                </span>
-                              )}
-                            </div>
-                          );
-                        }
-
-                        if (zone.displayStyle === 'cards') {
-                          return (
-                            <div
-                              key={item.id}
-                              data-item-id={item.id}
-                              draggable
-                              onDragStart={(e) => handleItemDragStart(e, item, zone.id)}
-                              onDragEnd={handleItemDragEnd}
-                              onDragOver={(e) => {
-                                if (item.isDir) {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  e.dataTransfer.dropEffect = 'move';
-                                  if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
-                                }
-                              }}
-                              onDragLeave={(e) => {
-                                if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                                if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
-                              }}
-                              onDrop={(e) => {
-                                if (item.isDir) handleDropOnFolder(e, item);
-                              }}
-                              onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
-                              onDoubleClick={() => onOpenItem(item)}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onContextMenu(e, item, zone.id);
-                              }}
-                              className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all relative ${
-                                isCut ? 'opacity-50' : ''
-                              } ${
-                                isFolderDragOver
-                                  ? 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 shadow-md'
-                                  : isSelected
-                                  ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300'
-                                  : 'bg-neutral-50/50 hover:bg-neutral-100/70 border-neutral-200/60'
-                              }`}
-                            >
-                              <div className="w-7 h-7 rounded-md bg-white border border-neutral-200/60 flex items-center justify-center shrink-0">
-                                {getFileIcon(item)}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-medium text-neutral-800 truncate">{item.name}</div>
-                                <div className="text-[10px] text-neutral-500">
-                                  {item.isDir ? 'Thư mục' : formatBytes(item.size)}
-                                </div>
-                              </div>
-                              {isFolderDragOver && (
-                                <span className="text-[10px] text-blue-700 font-medium bg-white/90 px-1.5 py-0.5 rounded border border-blue-300">
-                                  Thả vào thư mục
-                                </span>
-                              )}
-                            </div>
-                          );
-                        }
-
-                        // Compact or Details
-                        return (
-                          <div
-                            key={item.id}
-                            data-item-id={item.id}
-                            draggable
-                            onDragStart={(e) => handleItemDragStart(e, item, zone.id)}
-                            onDragEnd={handleItemDragEnd}
-                            onDragOver={(e) => {
-                              if (item.isDir) {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                e.dataTransfer.dropEffect = 'move';
-                                if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
-                              }
-                            }}
-                            onDragLeave={(e) => {
-                              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                              if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
-                            }}
-                            onDrop={(e) => {
-                              if (item.isDir) handleDropOnFolder(e, item);
-                            }}
-                            onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey, e.shiftKey)}
-                            onDoubleClick={() => onOpenItem(item)}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              onContextMenu(e, item, zone.id);
-                            }}
-                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs cursor-pointer select-none transition-all ${
-                              isCut ? 'opacity-50' : ''
-                            } ${
-                              isFolderDragOver
-                                ? 'bg-blue-100 text-blue-900 border-2 border-blue-500 font-semibold shadow-xs'
-                                : isSelected
-                                ? 'bg-blue-50 text-blue-900 border border-blue-300'
-                                : 'hover:bg-neutral-100/80 text-neutral-800 border border-transparent'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
-                              {getFileIcon(item)}
-                              <span className="truncate text-[11px] font-medium">{item.name}</span>
-                              {isFolderDragOver && (
-                                <span className="text-[10px] text-blue-700 bg-white/80 px-1 py-0.2 rounded border border-blue-300">
-                                  Thả vào thư mục
-                                </span>
-                              )}
-                            </div>
-
-                            {zone.displayStyle === 'details' && (
-                              <div className="flex items-center gap-3 shrink-0 text-[10px] text-neutral-500">
-                                <span>{item.isDir ? 'Folder' : formatBytes(item.size)}</span>
-                                <span>{new Date(item.modifiedMs).toLocaleDateString()}</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* 3. Unsorted / Other Files Box */}
-        {unsortedItems.length > 0 && (
+      {/* 2. Grid or Freeform Mode Canvas */}
+      {layoutMode === 'freeform' ? (
+        <div className="flex flex-col space-y-4">
           <div
-            id="zone-box-unsorted"
+            id="freeform-canvas-container"
+            className="relative w-full min-h-[850px] min-w-[1100px] bg-white/60 rounded-xl border border-neutral-200/80 overflow-auto shadow-inner p-2"
+            style={{
+              backgroundImage: isEditMode
+                ? 'radial-gradient(#94a3b8 1.2px, transparent 1.2px)'
+                : 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+              backgroundSize: '16px 16px',
+            }}
             onContextMenu={(e) => handleBackgroundContextMenu(e)}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = 'copy';
-              if (dragOverZoneId !== 'unsorted') setDragOverZoneId('unsorted');
-            }}
-            onDragLeave={(e) => {
-              if (e.currentTarget === e.target) setDragOverZoneId(null);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOverZoneId(null);
-              if (draggedSourceZoneId && draggedSourceZoneId !== 'unsorted') {
-                const list = draggedItems.length > 0 ? draggedItems : items.filter((i) => i.path === draggedItemPath);
-                const paths = list.map((i) => i.path);
-                const updatedZones = zones.map((z) => {
-                  if (z.id === draggedSourceZoneId) {
-                    return {
-                      ...z,
-                      rule: {
-                        ...z.rule,
-                        manualItemPaths: (z.rule.manualItemPaths || []).filter((p) => !paths.includes(p)),
-                      },
-                    };
-                  }
-                  return z;
-                });
-                onUpdateZones(updatedZones);
-                setDragDropFeedback(`Đã chuyển ${list.length} tệp ra khỏi hộp`);
-                setTimeout(() => setDragDropFeedback(null), 3000);
-              }
-              setDraggedItems([]);
-              setDraggedItemPath(null);
-              setDraggedSourceZoneId(null);
-            }}
-            className={`col-span-12 flex flex-col bg-white rounded-xl border border-dashed shadow-xs transition-all ${
-              dragOverZoneId === 'unsorted'
-                ? 'border-blue-500 bg-blue-50/20 ring-2 ring-blue-500'
-                : 'border-neutral-300'
-            }`}
           >
-            <div className="flex items-center justify-between px-3.5 py-2.5 bg-neutral-100/60 rounded-t-xl border-b border-neutral-200">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-neutral-400 shrink-0" />
-                <span className="font-semibold text-xs text-neutral-700">Các file khác trong thư mục (Chưa vào hộp nào)</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-200 text-neutral-700 font-medium">
-                  {unsortedItems.length} mục
-                </span>
-              </div>
-              <span className="text-[11px] text-neutral-400">
-                Kéo thả file vào bất kỳ hộp phía trên để phân loại
-              </span>
-            </div>
-
-            <div
-              onContextMenu={(e) => handleBackgroundContextMenu(e)}
-              className="p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-[220px] overflow-y-auto"
-            >
-              {unsortedItems.map((item) => {
-                const isSelected = selectedItems.some((s) => s.id === item.id);
-                const isCut = clipboard?.action === 'cut' && clipboard.items.some((i) => i.id === item.id);
-                const isFolderDragOver = item.isDir && dragOverFolderId === item.id;
-
-                return (
-                  <div
-                    key={item.id}
-                    data-item-id={item.id}
-                    draggable
-                    onDragStart={(e) => handleItemDragStart(e, item, 'unsorted')}
-                    onDragEnd={handleItemDragEnd}
-                    onDragOver={(e) => {
-                      if (item.isDir) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.dataTransfer.dropEffect = 'move';
-                        if (dragOverFolderId !== item.id) setDragOverFolderId(item.id);
-                      }
-                    }}
-                    onDragLeave={(e) => {
-                      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                      if (item.isDir && dragOverFolderId === item.id) setDragOverFolderId(null);
-                    }}
-                    onDrop={(e) => {
-                      if (item.isDir) handleDropOnFolder(e, item);
-                    }}
-                    onClick={(e) => onSelectItem(item, e.ctrlKey || e.metaKey)}
-                    onDoubleClick={() => onOpenItem(item)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onContextMenu(e, item);
-                    }}
-                    className={`flex items-center gap-2 p-1.5 rounded-lg border cursor-pointer text-xs transition-all relative ${
-                      isCut ? 'opacity-50' : ''
-                    } ${
-                      isFolderDragOver
-                        ? 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 text-blue-900 shadow-sm font-semibold'
-                        : isSelected
-                        ? 'bg-blue-50 border-blue-300 text-blue-900 ring-1 ring-blue-300'
-                        : 'bg-white hover:bg-neutral-50 border-neutral-200 text-neutral-700'
-                    }`}
-                  >
-                    {getFileIcon(item)}
-                    <span className="truncate text-[11px]">{item.name}</span>
-                    {isFolderDragOver && (
-                      <span className="text-[9px] text-blue-700 bg-white/90 px-1 py-0.2 rounded border border-blue-300 ml-auto shrink-0 font-medium">
-                        Thả vào
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            {zones.map((zone) => renderZoneBox(zone, true))}
           </div>
-        )}
-      </div>
+          {renderUnsortedBox(true)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-12 gap-4" onContextMenu={(e) => handleBackgroundContextMenu(e)}>
+          {zones.map((zone) => renderZoneBox(zone, false))}
+          {renderUnsortedBox(false)}
+        </div>
+      )}
 
       {/* 4. Modal: Thêm Khu Vực Mới */}
       {isAddZoneModalOpen && (

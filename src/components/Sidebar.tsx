@@ -1,20 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   HardDrive,
   Folder,
   Pin,
   PinOff,
   FolderInput,
+  FolderOpen,
   Monitor,
   FileText,
   Download,
-  Image,
+  Image as ImageIcon,
   Music,
   Video,
   Plus,
+  Archive,
+  File,
+  Code2,
 } from 'lucide-react';
 import { DriveInfo, KnownFolder } from '../types';
-import { getGlobalDragItems, clearGlobalDragItems } from '../services/fs';
+import {
+  getGlobalDragItems,
+  clearGlobalDragItems,
+  checkIsDirectory,
+  openRealItem,
+} from '../services/fs';
 
 interface SidebarProps {
   currentPath: string;
@@ -22,6 +31,8 @@ interface SidebarProps {
   drives: DriveInfo[];
   knownFolders: KnownFolder[];
   onNavigateToPath: (path: string) => void;
+  onOpenFile?: (path: string) => void;
+  onLocateItem?: (path: string) => void;
   onPinFolder?: (path: string) => void;
   onUnpinFolder: (path: string) => void;
   onOpenFolderPicker: () => void;
@@ -34,6 +45,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   drives,
   knownFolders,
   onNavigateToPath,
+  onOpenFile,
+  onLocateItem,
   onPinFolder,
   onUnpinFolder,
   onOpenFolderPicker,
@@ -41,6 +54,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [isQuickAccessDragOver, setIsQuickAccessDragOver] = useState(false);
+  const [pathTypeMap, setPathTypeMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    pinnedFolders.forEach(async (p) => {
+      if (pathTypeMap[p] === undefined) {
+        const isDir = await checkIsDirectory(p);
+        if (isMounted) {
+          setPathTypeMap((prev) => ({ ...prev, [p]: isDir }));
+        }
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [pinnedFolders]);
 
   const getKnownFolderIcon = (id: string) => {
     switch (id) {
@@ -51,7 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       case 'downloads':
         return <Download className="w-4 h-4 text-emerald-500" />;
       case 'pictures':
-        return <Image className="w-4 h-4 text-purple-500" />;
+        return <ImageIcon className="w-4 h-4 text-purple-500" />;
       case 'music':
         return <Music className="w-4 h-4 text-rose-500" />;
       case 'videos':
@@ -59,6 +88,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
       default:
         return <Folder className="w-4 h-4 text-amber-500" />;
     }
+  };
+
+  const getPinnedItemIcon = (path: string, isDir: boolean) => {
+    if (isDir) {
+      return <Folder className="w-4 h-4 text-amber-500 shrink-0" fill="currentColor" />;
+    }
+    const dotIdx = path.lastIndexOf('.');
+    const ext = dotIdx > 0 ? path.substring(dotIdx + 1).toLowerCase() : '';
+    if (['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'bmp', 'ico'].includes(ext)) {
+      return <ImageIcon className="w-4 h-4 text-emerald-500 shrink-0" />;
+    }
+    if (['mp4', 'mkv', 'webm', 'mov', 'avi'].includes(ext)) {
+      return <Video className="w-4 h-4 text-purple-500 shrink-0" />;
+    }
+    if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) {
+      return <Music className="w-4 h-4 text-pink-500 shrink-0" />;
+    }
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+      return <Archive className="w-4 h-4 text-amber-600 shrink-0" />;
+    }
+    if (['ts', 'tsx', 'js', 'jsx', 'json', 'py', 'html', 'css', 'rs', 'cpp'].includes(ext)) {
+      return <Code2 className="w-4 h-4 text-cyan-600 shrink-0" />;
+    }
+    if (['pdf', 'doc', 'docx', 'txt', 'rtf', 'md', 'xlsx', 'pptx'].includes(ext)) {
+      return <FileText className="w-4 h-4 text-blue-500 shrink-0" />;
+    }
+    return <File className="w-4 h-4 text-neutral-500 shrink-0" />;
   };
 
   const extractPaths = (e: React.DragEvent): string[] => {
@@ -112,21 +168,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     e.stopPropagation();
     setIsQuickAccessDragOver(false);
 
-    // 1. Check synchronous internal drag items first
+    // 1. Check synchronous internal drag items first (supports both files and folders!)
     const globalItems = getGlobalDragItems();
     if (globalItems.length > 0 && onPinFolder) {
-      const folderPaths = globalItems.filter((i) => i.isDir).map((i) => i.path);
+      globalItems.forEach((i) => {
+        setPathTypeMap((prev) => ({ ...prev, [i.path]: i.isDir }));
+        onPinFolder(i.path);
+      });
       clearGlobalDragItems();
-      if (folderPaths.length > 0) {
-        folderPaths.forEach((p) => onPinFolder(p));
-        return;
-      }
+      return;
     }
 
     // 2. Fallback to payload extraction
     const paths = extractPaths(e);
     if (paths.length > 0 && onPinFolder) {
-      paths.forEach((p) => onPinFolder(p));
+      paths.forEach(async (p) => {
+        const isDir = await checkIsDirectory(p);
+        setPathTypeMap((prev) => ({ ...prev, [p]: isDir }));
+        onPinFolder(p);
+      });
     }
   };
 
@@ -186,21 +246,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
               const name = path.split(/[/\\]/).filter(Boolean).pop() || path;
               const isSelected = currentPath === path;
               const isDragOver = dragOverPath === path;
+              const isDir =
+                pathTypeMap[path] !== undefined
+                  ? pathTypeMap[path]
+                  : !(/\.[a-zA-Z0-9]{1,8}$/.test(name));
+
+              const handleItemClick = () => {
+                if (isDir) {
+                  onNavigateToPath(path);
+                } else {
+                  if (onOpenFile) {
+                    onOpenFile(path);
+                  } else {
+                    openRealItem(path);
+                  }
+                }
+              };
+
+              const handleLocate = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                if (onLocateItem) {
+                  onLocateItem(path);
+                } else {
+                  const parent = path.substring(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')));
+                  if (parent) onNavigateToPath(parent);
+                }
+              };
 
               return (
                 <div
                   key={path}
-                  onClick={() => onNavigateToPath(path)}
+                  onClick={handleItemClick}
+                  onDoubleClick={handleItemClick}
                   onDragOver={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.dataTransfer.dropEffect = 'move';
-                    if (dragOverPath !== path) setDragOverPath(path);
+                    // Only allow dropping files into folders, not into files!
+                    if (isDir) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverPath !== path) setDragOverPath(path);
+                    }
                   }}
                   onDragLeave={() => {
                     if (dragOverPath === path) setDragOverPath(null);
                   }}
-                  onDrop={(e) => handleDropOnTargetFolder(e, path)}
+                  onDrop={(e) => {
+                    if (isDir) {
+                      handleDropOnTargetFolder(e, path);
+                    }
+                  }}
                   className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
                     isDragOver
                       ? 'bg-blue-200 text-blue-900 ring-2 ring-blue-500 font-semibold'
@@ -208,27 +302,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       ? 'bg-blue-100/80 text-blue-900 font-medium'
                       : 'hover:bg-neutral-200/60 text-neutral-800'
                   }`}
+                  title={
+                    isDir
+                      ? `Thư mục: ${path} (Click để mở)`
+                      : `Tệp: ${path} (Click để mở tệp)`
+                  }
                 >
                   <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-                    <Folder className="w-4 h-4 text-amber-500 shrink-0" fill="currentColor" />
+                    {getPinnedItemIcon(path, isDir)}
                     <span className="truncate">{name}</span>
+                    {!isDir && (
+                      <span className="text-[9px] text-neutral-400 bg-neutral-200/70 px-1 py-0.2 rounded shrink-0">
+                        Tệp
+                      </span>
+                    )}
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUnpinFolder(path);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-neutral-300 rounded text-neutral-500"
-                    title="Bỏ ghim"
-                  >
-                    <PinOff className="w-3.5 h-3.5" />
-                  </button>
+
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {!isDir && (
+                      <button
+                        onClick={handleLocate}
+                        className="p-1 hover:bg-neutral-300 rounded text-neutral-500 hover:text-neutral-800"
+                        title="Mở thư mục chứa tệp này"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUnpinFolder(path);
+                      }}
+                      className="p-1 hover:bg-neutral-300 rounded text-neutral-500 hover:text-rose-600"
+                      title="Bỏ ghim khỏi Truy cập nhanh"
+                    >
+                      <PinOff className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Dedicated drop target banner to pin any dragged folder */}
+          {/* Dedicated drop target banner to pin any dragged folder or file */}
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -245,7 +361,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <Pin className="w-3 h-3 text-amber-500 shrink-0" />
             <span className="text-[10.5px]">
-              {isQuickAccessDragOver ? 'Thả để ghim vào Truy Cập Nhanh' : 'Kéo thả thư mục vào đây để ghim'}
+              {isQuickAccessDragOver ? 'Thả để ghim vào Truy Cập Nhanh' : 'Kéo thả thư mục hoặc tệp vào đây'}
             </span>
           </div>
         </div>

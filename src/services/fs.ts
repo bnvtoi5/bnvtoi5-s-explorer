@@ -1491,3 +1491,38 @@ export function setupExternalFileDragData(e: React.DragEvent, itemsToDrag: FileI
     // Ignored
   }
 }
+
+// Check whether a target path is a directory or a file
+export async function checkIsDirectory(targetPath: string): Promise<boolean> {
+  if (!targetPath) return true;
+
+  if (isTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<boolean>('is_directory', { path: targetPath });
+    } catch {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('read_directory', { path: targetPath, showHidden: true });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  // Web Virtual / Handle fallback
+  const store = getVirtualStore();
+  const norm = normalizeVirtualPath(targetPath);
+  const found = store.find((it) => normalizeVirtualPath(it.path) === norm);
+  if (found) return found.isDir;
+  if (dirHandleRegistry.has(targetPath)) return true;
+
+  // Heuristic based on file extension
+  const fileName = targetPath.split(/[/\\]/).filter(Boolean).pop() || '';
+  const dotIdx = fileName.lastIndexOf('.');
+  if (dotIdx > 0 && dotIdx < fileName.length - 1) {
+    return false;
+  }
+  return true;
+}

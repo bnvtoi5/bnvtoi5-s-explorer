@@ -43,6 +43,12 @@ call npm run build
 
 echo [4/4] Compiling Windows NSIS Installer and Portable Executable via Tauri...
 call npm run tauri build
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [ERROR] Tauri build failed! Check the output above.
+    pause
+    exit /b %ERRORLEVEL%
+)
 
 if not exist release mkdir release
 

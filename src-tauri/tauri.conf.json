@@ -21,7 +21,7 @@
         "fullscreen": false,
         "center": true,
         "decorations": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -41,7 +41,7 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "installMode": "perMachine",
-        "languages": ["en-US"],
+        "languages": ["English"],
         "displayLanguageSelector": false
       },
       "wix": {

@@ -57,6 +57,21 @@ function aistudioMediaPlugin(): Plugin {
             // Fall through if URI decoding or file access fails
           }
         }
+        if (req.url && req.url.startsWith('/api/download')) {
+          try {
+            const urlObj = new URL(req.url, 'http://localhost');
+            const targetPath = urlObj.searchParams.get('path');
+            if (targetPath && fs.existsSync(targetPath) && fs.statSync(targetPath).isFile()) {
+              const fileName = path.basename(targetPath);
+              res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+              res.setHeader('Content-Type', 'application/octet-stream');
+              fs.createReadStream(targetPath).pipe(res);
+              return;
+            }
+          } catch {
+            // Fall through
+          }
+        }
         next();
       });
     },

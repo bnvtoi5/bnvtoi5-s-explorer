@@ -20,3 +20,10 @@ dirs = "5.0"
 [features]
 default = []
 portable = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

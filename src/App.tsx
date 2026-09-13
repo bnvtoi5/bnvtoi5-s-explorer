@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FileItem,
   DriveInfo,
@@ -18,6 +18,9 @@ import {
   searchRealFiles,
   createRealFolder,
   deleteRealItem,
+  openRealItem,
+  moveOrCopyRealItems,
+  renameRealItem,
 } from './services/fs';
 import { CommandBar } from './components/CommandBar';
 import { AddressBar } from './components/AddressBar';
@@ -32,7 +35,7 @@ import { StatusBar } from './components/StatusBar';
 
 export default function App() {
   // Navigation & Directory state
-  const [currentPath, setCurrentPath] = useState<string>('');
+  const [currentPath, setCurrentPath] = useState<string>('C:\\Users\\Admin\\Downloads');
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [items, setItems] = useState<FileItem[]>([]);
@@ -42,6 +45,12 @@ export default function App() {
 
   // Selection state
   const [selectedItems, setSelectedItems] = useState<FileItem[]>([]);
+
+  // Clipboard state for Cut / Copy / Paste
+  const [clipboard, setClipboard] = useState<{
+    items: FileItem[];
+    action: 'copy' | 'cut';
+  } | null>(null);
 
   // Preferences state
   const [preferences, setPreferences] = useState<UserPreferences>({
@@ -126,6 +135,12 @@ export default function App() {
         navigateTo(sysDrives[0].path, false);
       } else if (prefs.lastVisitedPath) {
         navigateTo(prefs.lastVisitedPath, false);
+      } else if (kf.length > 0) {
+        navigateTo(kf[0].path, false);
+      } else if (sysDrives.length > 0) {
+        navigateTo(sysDrives[0].path, false);
+      } else {
+        navigateTo('C:\\Users\\Admin\\Downloads', false);
       }
     }
     init();
@@ -193,30 +208,64 @@ export default function App() {
     [historyIndex, loadDirectory, updatePreferences]
   );
 
-  // Update Smart Zones
+  // Current active Smart Zones based on currentPath (Folder-specific isolation)
+  const activeSmartZones: SmartZone[] = useMemo(() => {
+    if (currentPath && preferences.folderSmartZones && preferences.folderSmartZones[currentPath]) {
+      return preferences.folderSmartZones[currentPath];
+    }
+    return preferences.smartZones;
+  }, [currentPath, preferences.folderSmartZones, preferences.smartZones]);
+
+  const isCustomFolderConfig = Boolean(
+    currentPath && preferences.folderSmartZones && preferences.folderSmartZones[currentPath]
+  );
+
+  // Update Smart Zones (saves to folderSmartZones if currentPath exists, isolating each folder's setup)
   const handleUpdateSmartZones = (newZones: SmartZone[]) => {
-    updatePreferences((prev) => ({ ...prev, smartZones: newZones }));
+    if (currentPath) {
+      updatePreferences((prev) => ({
+        ...prev,
+        folderSmartZones: {
+          ...(prev.folderSmartZones || {}),
+          [currentPath]: newZones,
+        },
+      }));
+    } else {
+      updatePreferences((prev) => ({ ...prev, smartZones: newZones }));
+    }
   };
 
-  // Assign item to a zone
+  // Reset folder-specific configuration back to default
+  const handleResetFolderZones = () => {
+    if (currentPath && preferences.folderSmartZones && preferences.folderSmartZones[currentPath]) {
+      updatePreferences((prev) => {
+        const nextFolderMap = { ...(prev.folderSmartZones || {}) };
+        delete nextFolderMap[currentPath];
+        return {
+          ...prev,
+          folderSmartZones: nextFolderMap,
+        };
+      });
+    }
+  };
+
+  // Assign item to a zone (Non-exclusive, saves to active folder's zone configuration)
   const handleAssignItemToZone = (zoneId: string, item: FileItem) => {
-    updatePreferences((prev) => ({
-      ...prev,
-      smartZones: prev.smartZones.map((z) => {
-        if (z.id === zoneId) {
-          const cur = z.rule.manualItemPaths || [];
-          return {
-            ...z,
-            rule: {
-              ...z.rule,
-              ruleType: 'manual',
-              manualItemPaths: cur.includes(item.path) ? cur : [...cur, item.path],
-            },
-          };
-        }
-        return z;
-      }),
-    }));
+    const updatedZones = activeSmartZones.map((z) => {
+      if (z.id === zoneId) {
+        const cur = z.rule.manualItemPaths || [];
+        return {
+          ...z,
+          rule: {
+            ...z.rule,
+            manualItemPaths: cur.includes(item.path) ? cur : [...cur, item.path],
+          },
+        };
+      }
+      return z;
+    });
+
+    handleUpdateSmartZones(updatedZones);
   };
 
   // History navigation
@@ -321,8 +370,213 @@ export default function App() {
     return sorted;
   }, [items, searchResults, searchQuery, preferences.sortBy, preferences.sortOrder]);
 
+  // Clipboard and Move handlers
+  const handleCopy = useCallback((item?: FileItem) => {
+    let targets: FileItem[] = [];
+    if (item) {
+      if (selectedItems.some((s) => s.id === item.id)) {
+        targets = selectedItems;
+      } else {
+        targets = [item];
+        setSelectedItems([item]);
+      }
+    } else {
+      targets = selectedItems;
+    }
+    if (targets.length === 0) return;
+    setClipboard({ items: targets, action: 'copy' });
+    try {
+      navigator.clipboard.writeText(targets.map((i) => i.path).join('\n'));
+    } catch {}
+  }, [selectedItems]);
+
+  const handleCut = useCallback((item?: FileItem) => {
+    let targets: FileItem[] = [];
+    if (item) {
+      if (selectedItems.some((s) => s.id === item.id)) {
+        targets = selectedItems;
+      } else {
+        targets = [item];
+        setSelectedItems([item]);
+      }
+    } else {
+      targets = selectedItems;
+    }
+    if (targets.length === 0) return;
+    setClipboard({ items: targets, action: 'cut' });
+  }, [selectedItems]);
+
+  const handlePaste = useCallback(async (targetDir?: string) => {
+    if (!clipboard || clipboard.items.length === 0) return;
+    const destDir = targetDir || currentPath;
+    if (!destDir) return;
+    try {
+      const sourcePaths = clipboard.items.map((i) => i.path);
+      const isCopy = clipboard.action === 'copy';
+      const res = await moveOrCopyRealItems(sourcePaths, destDir, isCopy);
+
+      if (contextMenu.targetZoneId) {
+        const targetZone = activeSmartZones.find((z) => z.id === contextMenu.targetZoneId);
+        if (targetZone) {
+          const updatedZones = activeSmartZones.map((z) => {
+            if (z.id === targetZone.id) {
+              const currentPaths = z.rule.manualItemPaths || [];
+              const combined = Array.from(new Set([...currentPaths, ...sourcePaths]));
+              return {
+                ...z,
+                rule: {
+                  ...z.rule,
+                  manualItemPaths: combined,
+                },
+              };
+            }
+            return z;
+          });
+          handleUpdateSmartZones(updatedZones);
+        }
+      }
+
+      if (clipboard.action === 'cut') {
+        setClipboard(null);
+      }
+      await handleRefresh();
+
+      // Automatically highlight the pasted items for immediate visual confirmation
+      if (res && res.length > 0) {
+        setSelectedItems(res);
+      }
+    } catch (err: unknown) {
+      alert((err as Error).message || 'Dán tệp tin thất bại');
+    }
+  }, [clipboard, currentPath, contextMenu.targetZoneId, activeSmartZones, handleRefresh]);
+
+  const handleMoveItemsToFolder = useCallback(
+    async (sourcePaths: string[], targetFolderPath: string) => {
+      try {
+        await moveOrCopyRealItems(sourcePaths, targetFolderPath, false);
+        handleRefresh();
+      } catch (err: unknown) {
+        alert((err as Error).message || 'Di chuyển tệp thất bại');
+      }
+    },
+    [handleRefresh]
+  );
+
+  const handleDropExternalFiles = useCallback(
+    async (files: FileList | File[]) => {
+      if (!currentPath) return;
+      try {
+        const rootDirHandle = (window as unknown as { _currentDirectoryHandle?: FileSystemDirectoryHandle })._currentDirectoryHandle;
+        if (rootDirHandle) {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const fileHandle = await rootDirHandle.getFileHandle(file.name, { create: true });
+            if ('createWritable' in fileHandle) {
+              const writable = await (fileHandle as unknown as { createWritable: () => Promise<{ write: (c: unknown) => Promise<void>; close: () => Promise<void> }> }).createWritable();
+              await writable.write(file);
+              await writable.close();
+            }
+          }
+        }
+        handleRefresh();
+      } catch (err: unknown) {
+        console.warn('Drop external files:', err);
+      }
+    },
+    [currentPath, handleRefresh]
+  );
+
+  // Rename selected action
+  const handleRenameSelected = useCallback(() => {
+    if (selectedItems.length !== 1) return;
+    const item = selectedItems[0];
+    setInputModal({
+      type: 'rename',
+      initialValue: item.name,
+      itemName: item.name,
+      targetItem: item,
+      isOpen: true,
+    });
+  }, [selectedItems]);
+
+  // Delete selected action
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedItems.length === 0) return;
+    const firstItem = selectedItems[0];
+    setInputModal({
+      type: 'confirm-delete',
+      itemName: selectedItems.length > 1 ? `${selectedItems.length} mục` : firstItem.name,
+      targetItem: firstItem,
+      isOpen: true,
+    });
+  }, [selectedItems]);
+
+  // Keyboard shortcuts: Esc to deselect, Ctrl+A to select all, Ctrl+C, Ctrl+X, Ctrl+V, Delete, F2
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isTyping =
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          (activeEl as HTMLElement).isContentEditable);
+
+      if (e.key === 'Escape') {
+        setContextMenu((prev) => ({ ...prev, isOpen: false }));
+        setPreviewItem(null);
+        setSelectedItems([]);
+      } else if (!isTyping) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+          e.preventDefault();
+          setSelectedItems(displayedItems);
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+          e.preventDefault();
+          handleCopy();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+          e.preventDefault();
+          handleCut();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+          e.preventDefault();
+          handlePaste();
+        } else if (e.key === 'Delete') {
+          e.preventDefault();
+          handleDeleteSelected();
+        } else if (e.key === 'F2') {
+          e.preventDefault();
+          handleRenameSelected();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [displayedItems, handleCopy, handleCut, handlePaste, handleDeleteSelected, handleRenameSelected]);
+
   // Selection handlers
-  const handleSelectItem = (item: FileItem, isMulti: boolean) => {
+  const lastSelectedItemRef = useRef<FileItem | null>(null);
+
+  const handleSelectItem = (item: FileItem, isMulti: boolean, isRange?: boolean) => {
+    if (isRange && lastSelectedItemRef.current) {
+      const lastIdx = displayedItems.findIndex((i) => i.id === lastSelectedItemRef.current?.id);
+      const currIdx = displayedItems.findIndex((i) => i.id === item.id);
+      if (lastIdx !== -1 && currIdx !== -1) {
+        const start = Math.min(lastIdx, currIdx);
+        const end = Math.max(lastIdx, currIdx);
+        const range = displayedItems.slice(start, end + 1);
+        if (isMulti) {
+          const combined = new Map<string, FileItem>();
+          selectedItems.forEach((i) => combined.set(i.id, i));
+          range.forEach((i) => combined.set(i.id, i));
+          setSelectedItems(Array.from(combined.values()));
+        } else {
+          setSelectedItems(range);
+        }
+        return;
+      }
+    }
+
+    lastSelectedItemRef.current = item;
+
     if (isMulti) {
       setSelectedItems((prev) =>
         prev.some((s) => s.id === item.id)
@@ -334,14 +588,24 @@ export default function App() {
     }
   };
 
-  // Open item (double click or Enter)
-  const handleOpenItem = (item: FileItem) => {
+  // Open item (double click or Enter) -> Open natively with default system app
+  const handleOpenItem = async (item: FileItem) => {
     if (item.isDir) {
       navigateTo(item.path);
     } else {
-      setPreviewItem(item);
+      try {
+        await openRealItem(item.path);
+      } catch (err) {
+        console.warn('Cannot launch with native system app:', err);
+        setPreviewItem(item);
+      }
     }
   };
+
+  // Multiple selection handler (e.g. marquee box drag selection)
+  const handleSelectMultiple = useCallback((newSelected: FileItem[]) => {
+    setSelectedItems(newSelected);
+  }, []);
 
   // Pin / Unpin folder handlers
   const handlePinFolder = (path: string) => {
@@ -359,13 +623,18 @@ export default function App() {
   };
 
   // Context Menu trigger
-  const handleContextMenu = (e: React.MouseEvent, item: FileItem | null) => {
+  const handleContextMenu = (
+    e: React.MouseEvent,
+    item: FileItem | null,
+    targetZoneId?: string
+  ) => {
     e.preventDefault();
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
       item,
       isOpen: true,
+      targetZoneId,
     });
     if (item && !selectedItems.some((s) => s.id === item.id)) {
       setSelectedItems([item]);
@@ -386,31 +655,6 @@ export default function App() {
     setInputModal({
       type: 'new-file',
       initialValue: 'New Text Document.txt',
-      isOpen: true,
-    });
-  };
-
-  // Rename selected action
-  const handleRenameSelected = () => {
-    if (selectedItems.length !== 1) return;
-    const item = selectedItems[0];
-    setInputModal({
-      type: 'rename',
-      initialValue: item.name,
-      itemName: item.name,
-      targetItem: item,
-      isOpen: true,
-    });
-  };
-
-  // Delete selected action
-  const handleDeleteSelected = () => {
-    if (selectedItems.length === 0) return;
-    const firstItem = selectedItems[0];
-    setInputModal({
-      type: 'confirm-delete',
-      itemName: selectedItems.length > 1 ? `${selectedItems.length} mục` : firstItem.name,
-      targetItem: firstItem,
       isOpen: true,
     });
   };
@@ -444,16 +688,13 @@ export default function App() {
         handleRefresh();
       } else if (inputModal.type === 'rename' && inputModal.targetItem) {
         const item = inputModal.targetItem;
-        const isWindows = currentPath.includes('\\');
+        const isWindows = item.path.includes('\\');
         const sep = isWindows ? '\\' : '/';
-        const newPath = `${currentPath}${sep}${val.trim()}`;
+        const lastSlash = Math.max(item.path.lastIndexOf('/'), item.path.lastIndexOf('\\'));
+        const parentPath = lastSlash >= 0 ? item.path.substring(0, lastSlash) : currentPath;
+        const newPath = `${parentPath}${sep}${val.trim()}`;
 
-        if (isTauri()) {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('rename_file_or_dir', { oldPath: item.path, newPath });
-        } else {
-          alert('Renaming requires Tauri native desktop mode');
-        }
+        await renameRealItem(item.path, newPath);
         handleRefresh();
       }
     } catch (err: unknown) {
@@ -483,6 +724,10 @@ export default function App() {
       <CommandBar
         currentPath={currentPath}
         selectedItems={selectedItems}
+        clipboard={clipboard}
+        onCut={() => handleCut()}
+        onCopy={() => handleCopy()}
+        onPaste={() => handlePaste()}
         viewMode={preferences.viewMode}
         onViewModeChange={(mode) => updatePreferences((p) => ({ ...p, viewMode: mode }))}
         sortBy={preferences.sortBy}
@@ -525,8 +770,10 @@ export default function App() {
           drives={drives}
           knownFolders={knownFolders}
           onNavigateToPath={(path) => navigateTo(path)}
+          onPinFolder={handlePinFolder}
           onUnpinFolder={handleUnpinFolder}
           onOpenFolderPicker={handleOpenFolderPicker}
+          onMoveItemsToFolder={handleMoveItemsToFolder}
         />
 
         <main className="flex-1 flex flex-col min-w-0 bg-white relative overflow-hidden">
@@ -539,13 +786,19 @@ export default function App() {
             <SmartZonesView
               items={displayedItems}
               currentPath={currentPath}
-              zones={preferences.smartZones}
+              zones={activeSmartZones}
+              isCustomFolderConfig={isCustomFolderConfig}
               onUpdateZones={handleUpdateSmartZones}
+              onResetFolderZones={handleResetFolderZones}
+              onRefresh={handleRefresh}
               selectedItems={selectedItems}
               onSelectItem={handleSelectItem}
+              onSelectMultiple={handleSelectMultiple}
               onOpenItem={handleOpenItem}
               onContextMenu={handleContextMenu}
               onOpenFolderPicker={handleOpenFolderPicker}
+              clipboard={clipboard}
+              onMoveItemsToFolder={handleMoveItemsToFolder}
             />
           ) : (
             /* STANDARD EXPLORER LIST / GRID / TILES VIEW */
@@ -553,7 +806,9 @@ export default function App() {
               items={displayedItems}
               currentPath={currentPath}
               selectedItems={selectedItems}
+              clipboard={clipboard}
               onSelectItem={handleSelectItem}
+              onSelectMultiple={handleSelectMultiple}
               onOpenItem={handleOpenItem}
               onContextMenu={handleContextMenu}
               viewMode={preferences.viewMode}
@@ -564,6 +819,8 @@ export default function App() {
               }
               onOpenFolderPicker={handleOpenFolderPicker}
               isSearching={Boolean(searchQuery.trim())}
+              onMoveItemsToFolder={handleMoveItemsToFolder}
+              onDropExternalFiles={handleDropExternalFiles}
             />
           )}
         </main>
@@ -583,9 +840,22 @@ export default function App() {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          currentPath={currentPath}
           item={contextMenu.item}
+          targetZoneId={contextMenu.targetZoneId}
           pinnedFolders={preferences.pinnedFolders}
-          smartZones={preferences.smartZones}
+          smartZones={activeSmartZones}
+          viewMode={preferences.viewMode}
+          onViewModeChange={(mode) => updatePreferences((p) => ({ ...p, viewMode: mode }))}
+          sortBy={preferences.sortBy}
+          sortOrder={preferences.sortOrder}
+          onSortChange={(field, order) =>
+            updatePreferences((p) => ({ ...p, sortBy: field, sortOrder: order }))
+          }
+          clipboard={clipboard}
+          onCopy={(item) => handleCopy(item)}
+          onCut={(item) => handleCut(item)}
+          onPaste={handlePaste}
           onClose={() => setContextMenu((prev) => ({ ...prev, isOpen: false }))}
           onOpen={(item) => handleOpenItem(item)}
           onPin={handlePinFolder}

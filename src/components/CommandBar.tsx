@@ -12,12 +12,25 @@ import {
   Eye,
   RefreshCw,
   Layers,
+  Terminal,
+  FileSpreadsheet,
+  FileText,
+  Presentation,
+  PackageOpen,
+  Scissors,
+  Copy,
+  ClipboardPaste,
 } from 'lucide-react';
 import { ViewMode, SortField, SortOrder, FileItem } from '../types';
+import { launchTerminal, createNewTemplateFile, extractArchiveItem } from '../services/fs';
 
 interface CommandBarProps {
   currentPath: string;
   selectedItems: FileItem[];
+  clipboard?: { items: FileItem[]; action: 'copy' | 'cut' } | null;
+  onCut?: () => void;
+  onCopy?: () => void;
+  onPaste?: () => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
   sortBy: SortField;
@@ -36,6 +49,10 @@ interface CommandBarProps {
 export const CommandBar: React.FC<CommandBarProps> = ({
   currentPath,
   selectedItems,
+  clipboard,
+  onCut,
+  onCopy,
+  onPaste,
   viewMode,
   onViewModeChange,
   sortBy,
@@ -114,14 +131,15 @@ export const CommandBar: React.FC<CommandBarProps> = ({
           </button>
 
           {showNewMenu && (
-            <div className="absolute left-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute left-0 mt-1 w-52 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+              <div className="px-3 py-1 text-neutral-400 font-semibold uppercase text-[10px]">Tạo mới</div>
               <button
                 id="btn-create-folder"
                 onClick={() => {
                   setShowNewMenu(false);
                   onCreateFolder();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
               >
                 <FolderPlus className="w-4 h-4 text-amber-500" />
                 <span>Thư mục mới</span>
@@ -132,14 +150,154 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                   setShowNewMenu(false);
                   onCreateFile();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
               >
                 <FilePlus className="w-4 h-4 text-blue-500" />
                 <span>Tập tin văn bản (.txt)</span>
               </button>
+              <div className="border-t border-neutral-200 my-1" />
+              <button
+                id="btn-create-docx"
+                onClick={async () => {
+                  setShowNewMenu(false);
+                  await createNewTemplateFile(currentPath, 'docx');
+                  onRefresh();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
+              >
+                <FileText className="w-4 h-4 text-blue-600" />
+                <span>Tài liệu Word (.docx)</span>
+              </button>
+              <button
+                id="btn-create-xlsx"
+                onClick={async () => {
+                  setShowNewMenu(false);
+                  await createNewTemplateFile(currentPath, 'xlsx');
+                  onRefresh();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Bảng tính Excel (.xlsx)</span>
+              </button>
+              <button
+                id="btn-create-pptx"
+                onClick={async () => {
+                  setShowNewMenu(false);
+                  await createNewTemplateFile(currentPath, 'pptx');
+                  onRefresh();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
+              >
+                <Presentation className="w-4 h-4 text-orange-600" />
+                <span>Bài thuyết trình (.pptx)</span>
+              </button>
+              <button
+                id="btn-create-md"
+                onClick={async () => {
+                  setShowNewMenu(false);
+                  await createNewTemplateFile(currentPath, 'md');
+                  onRefresh();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100 text-neutral-800 text-xs"
+              >
+                <FileText className="w-4 h-4 text-purple-600" />
+                <span>Tài liệu Markdown (.md)</span>
+              </button>
             </div>
           )}
         </div>
+
+        {/* Terminal Quick Button */}
+        <button
+          id="btn-cmd-quick"
+          onClick={() => launchTerminal(currentPath)}
+          disabled={!currentPath}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
+            currentPath
+              ? 'hover:bg-neutral-200/80 active:bg-neutral-300/80 text-neutral-800'
+              : 'text-neutral-400 cursor-not-allowed'
+          }`}
+          title="Mở Command Prompt (cmd) tại thư mục hiện tại"
+        >
+          <Terminal className="w-4 h-4 text-neutral-700" />
+          <span>CMD</span>
+        </button>
+
+        {/* Quick Extract if single archive is selected */}
+        {singleSelection && ['zip', 'rar', '7z', 'tar', 'gz'].includes((selectedItems[0].extension || '').toLowerCase()) && (
+          <button
+            id="btn-quick-extract"
+            onClick={async () => {
+              try {
+                await extractArchiveItem(selectedItems[0].path);
+                onRefresh();
+              } catch (err: unknown) {
+                alert((err as Error).message || 'Không thể giải nén file');
+              }
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 transition-colors text-xs font-medium"
+            title="Giải nén file nén tại thư mục hiện tại"
+          >
+            <PackageOpen className="w-4 h-4 text-amber-600" />
+            <span>Giải nén</span>
+          </button>
+        )}
+
+        <div className="h-4 w-px bg-neutral-300 mx-1" />
+
+        {/* Cut (Ctrl+X) */}
+        <button
+          id="btn-cut-item"
+          onClick={onCut}
+          disabled={!hasSelection}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
+            hasSelection
+              ? 'hover:bg-neutral-200/80 active:bg-neutral-300/80 text-neutral-800'
+              : 'text-neutral-400 cursor-not-allowed'
+          }`}
+          title="Cắt mục đã chọn (Ctrl+X)"
+        >
+          <Scissors className="w-4 h-4" />
+          <span>Cắt</span>
+        </button>
+
+        {/* Copy (Ctrl+C) */}
+        <button
+          id="btn-copy-item"
+          onClick={onCopy}
+          disabled={!hasSelection}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
+            hasSelection
+              ? 'hover:bg-neutral-200/80 active:bg-neutral-300/80 text-neutral-800'
+              : 'text-neutral-400 cursor-not-allowed'
+          }`}
+          title="Sao chép mục đã chọn (Ctrl+C)"
+        >
+          <Copy className="w-4 h-4" />
+          <span>Sao chép</span>
+        </button>
+
+        {/* Paste (Ctrl+V) */}
+        <button
+          id="btn-paste-item"
+          onClick={onPaste}
+          disabled={!clipboard}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
+            clipboard
+              ? 'hover:bg-blue-100/80 active:bg-blue-200/80 text-blue-800 font-medium bg-blue-50/60'
+              : 'text-neutral-400 cursor-not-allowed'
+          }`}
+          title={clipboard ? `Dán ${clipboard.items.length} mục (${clipboard.action === 'cut' ? 'di chuyển' : 'sao chép'}) (Ctrl+V)` : 'Dán tệp tin (Ctrl+V)'}
+        >
+          <ClipboardPaste className={`w-4 h-4 ${clipboard ? 'text-blue-600' : ''}`} />
+          <span>Dán</span>
+          {clipboard && (
+            <span className="ml-0.5 px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] leading-tight font-semibold">
+              {clipboard.items.length}
+            </span>
+          )}
+        </button>
 
         <div className="h-4 w-px bg-neutral-300 mx-1" />
 
